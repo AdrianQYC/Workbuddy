@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f8fafc" />
+    <title>Workbuddy</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" id="todayText">今日</p>
+          <h1>Workbuddy</h1>
+        </div>
+      </header>
+
+      <main class="planner">
+        <section class="left-panel" aria-label="计划概览">
+          <div class="date-strip" id="dateStrip"></div>
+
+          <div class="stats-grid">
+            <div class="stat">
+              <span class="stat-label">今天</span>
+              <strong id="todayCount">0</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">本周</span>
+              <strong id="weekCount">0</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">中期</span>
+              <strong id="mediumCount">0</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">待安排</span>
+              <strong id="inboxCount">0</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">总完成</span>
+              <strong id="doneCount">0</strong>
+            </div>
+          </div>
+
+          <form class="task-form" id="taskForm">
+            <input id="taskTitle" type="text" maxlength="80" placeholder="添加一个任务" autocomplete="off" required />
+            <div class="form-row">
+              <label class="select-field">
+                <span>类型</span>
+                <select id="taskScope" aria-label="任务类型">
+                  <option value="schedule">日程</option>
+                  <option value="medium">中期</option>
+                </select>
+              </label>
+              <label class="date-field">
+                <span id="taskDateLabel">日期</span>
+                <input id="taskDate" type="date" />
+              </label>
+              <label class="select-field priority-select">
+                <span>重要性</span>
+                <select id="taskPriority" aria-label="重要性">
+                  <option value="normal">普通</option>
+                  <option value="high">重要</option>
+                  <option value="urgent">紧急</option>
+                </select>
+              </label>
+              <button class="primary-button" type="submit">添加</button>
+            </div>
+          </form>
+
+          <section class="backup-panel" aria-label="数据备份">
+            <div class="backup-heading">
+              <strong>数据备份</strong>
+              <span id="backupStatus">适合配合坚果云手动同步</span>
+            </div>
+            <div class="backup-actions">
+              <button class="backup-button primary" id="exportBtn" type="button">导出备份</button>
+              <label class="backup-button import-button">
+                导入备份
+                <input id="importInput" type="file" accept="application/json,.json" />
+              </label>
+              <button class="backup-button" id="restoreImportBackup" type="button" disabled>恢复导入前数据</button>
+            </div>
+          </section>
+        </section>
+
+        <section class="main-panel" aria-label="任务列表">
+          <div class="toolbar">
+            <div class="segments" role="tablist" aria-label="视图">
+              <button class="segment is-active" type="button" data-view="today">今天</button>
+              <button class="segment" type="button" data-view="week">本周</button>
+              <button class="segment" type="button" data-view="medium">中期</button>
+              <button class="segment" type="button" data-view="inbox">收集箱</button>
+              <button class="segment" type="button" data-view="search">搜索</button>
+            </div>
+          </div>
+
+          <div class="status-filters" id="statusFilters">
+            <button class="status-filter is-active" type="button" data-status-filter="all">全部</button>
+            <button class="status-filter" type="button" data-status-filter="open">未完成</button>
+            <button class="status-filter" type="button" data-status-filter="done">已完成</button>
+          </div>
+
+          <form class="search-panel" id="searchPanel" hidden>
+            <input id="searchKeyword" type="search" placeholder="关键词" autocomplete="off" />
+            <label class="date-field">
+              <span>日期</span>
+              <input id="searchDate" type="date" />
+            </label>
+            <label class="select-field priority-select priority-normal">
+              <span>重要性</span>
+              <select id="searchPriority" aria-label="搜索重要性">
+                <option value="all">全部</option>
+                <option value="normal">普通</option>
+                <option value="high">重要</option>
+                <option value="urgent">紧急</option>
+              </select>
+            </label>
+            <label class="select-field">
+              <span>完成</span>
+              <select id="searchStatus" aria-label="搜索完成情况">
+                <option value="all">全部</option>
+                <option value="open">未完成</option>
+                <option value="done">已完成</option>
+              </select>
+            </label>
+            <button class="clear-search" id="clearSearch" type="button">清空</button>
+          </form>
+
+          <div class="list-heading">
+            <h2 id="viewTitle">今天</h2>
+            <span id="viewMeta">0 项</span>
+          </div>
+
+          <div class="task-list" id="taskList"></div>
+          <div class="empty-state" id="emptyState" hidden>
+            <div class="empty-visual" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <p>这里还没有任务</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <template id="taskTemplate">
+      <article class="task-item">
+        <button class="check-button" type="button" aria-label="切换完成状态"></button>
+        <div class="task-body">
+          <div class="task-main">
+            <h3></h3>
+            <span class="priority-pill"></span>
+          </div>
+          <div class="task-meta"></div>
+        </div>
+        <div class="task-actions">
+          <button class="icon-button small" type="button" data-action="schedule" aria-label="安排到今天" title="安排到今天">◎</button>
+          <button class="icon-button small" type="button" data-action="delete" aria-label="删除" title="删除">×</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
