@@ -104,9 +104,12 @@ function bindEvents() {
             children: [],
             priority: elements.taskPriority.value,
             done: false,
+            canceled: false,
+            cancelReason: "",
             order: nextOrder(),
             createdAt: new Date().toISOString(),
             completedAt: null,
+            canceledAt: null,
           },
     );
 
@@ -280,16 +283,19 @@ function renderTaskEntry(entry) {
   const actions = node.querySelector(".task-actions");
 
   node.classList.toggle("is-done", entry.done);
+  node.classList.toggle("is-canceled", isCanceled(entry));
   node.classList.add(`priority-${entry.priority}`);
   setupDraggableElement(node, entry);
   check.classList.toggle("is-checked", entry.done);
+  check.disabled = isCanceled(entry);
   title.textContent = entry.title;
   pill.textContent = priorityLabels[entry.priority] || priorityLabels.normal;
   pill.classList.add(entry.priority || "normal");
-  meta.textContent = entryMeta(entry);
-  schedule.hidden = entry.done || entry.date === state.selectedDate;
+  meta.innerHTML = entryMetaHtml(entry);
+  schedule.hidden = entry.done || isCanceled(entry) || entry.date === state.selectedDate;
 
   actions.prepend(createEditButton(entry));
+  actions.prepend(createCancelButton(entry));
   check.addEventListener("click", () => toggleEntryDone(entry));
   schedule.addEventListener("click", () => scheduleEntryToday(entry));
   remove.addEventListener("click", () => deleteEntry(entry));
@@ -391,6 +397,18 @@ function createEditButton(entry) {
     render();
   });
   return edit;
+}
+
+function createCancelButton(entry) {
+  const cancel = document.createElement("button");
+  cancel.className = "icon-button small cancel-entry-button";
+  cancel.type = "button";
+  cancel.title = isCanceled(entry) ? "恢复任务" : "取消并记录原因";
+  cancel.setAttribute("aria-label", isCanceled(entry) ? "恢复任务" : "取消并记录原因");
+  cancel.textContent = isCanceled(entry) ? "↺" : "⊘";
+  cancel.hidden = entry.kind !== "task" || entry.done;
+  cancel.addEventListener("click", () => toggleTaskCanceled(entry.id));
+  return cancel;
 }
 
 function createEntryEditor(entry, className) {
@@ -818,7 +836,8 @@ function currentStatusFilter() {
 
 function filterByStatus(entries, filter) {
   if (filter === "done") return entries.filter((entry) => entry.done);
-  if (filter === "open") return entries.filter((entry) => !entry.done);
+  if (filter === "open") return entries.filter((entry) => !entry.done && !isCanceled(entry));
+  if (filter === "canceled") return entries.filter(isCanceled);
   return entries;
 }
 
@@ -899,7 +918,8 @@ function matchesSearch(entry) {
   if (state.search.date && dateValue !== state.search.date) return false;
   if (state.search.priority !== "all" && entry.priority !== state.search.priority) return false;
   if (state.search.status === "done" && !entry.done) return false;
-  if (state.search.status === "open" && entry.done) return false;
+  if (state.search.status === "open" && (entry.done || isCanceled(entry))) return false;
+  if (state.search.status === "canceled" && !isCanceled(entry)) return false;
   return true;
 }
 
@@ -919,6 +939,7 @@ function unitCompletionStats(entries) {
       units.set(key, { done: Boolean(goalDoneById.get(entry.parentId)) });
       return;
     }
+    if (isCanceled(entry)) return;
     units.set(entry.entryId, { done: entry.done });
   });
 
@@ -965,7 +986,8 @@ function currentViewMeta(entries) {
   if (state.view === "search") return `${countSearchResults(entries)} 项匹配`;
   if (state.view === "inbox") return `${entries.length} 项`;
   if (state.view === "medium") return `${entries.length} 个目标 · ${formatRatio(goalCompletionStats(allMediumGoals()))} 已完成`;
-  return `${formatRatio(unitCompletionStats(entries))} 已完成`;
+  const canceled = canceledCount(entries);
+  return `${formatRatio(unitCompletionStats(entries))} 已完成${canceled ? ` · ${canceled} 已取消` : ""}`;
 }
 
 function countSearchResults(results) {
@@ -1110,7 +1132,28 @@ function toggleEntryDone(entry) {
 function toggleTaskDone(id) {
   state.tasks = state.tasks.map((task) => {
     if (task.id !== id) return task;
+    if (isCanceled(task)) return task;
     return withDone(task, !task.done);
+  });
+  saveTasks();
+  render();
+}
+
+function toggleTaskCanceled(id) {
+  state.tasks = state.tasks.map((task) => {
+    if (task.id !== id) return task;
+    if (isCanceled(task)) return { ...task, canceled: false, cancelReason: "", canceledAt: null };
+
+    const reason = prompt("取消原因（可以简单写一句）：", task.cancelReason || "");
+    if (reason === null) return task;
+    return {
+      ...task,
+      done: false,
+      completedAt: null,
+      canceled: true,
+      cancelReason: reason.trim(),
+      canceledAt: new Date().toISOString(),
+    };
   });
   saveTasks();
   render();
@@ -1197,6 +1240,9 @@ function withDone(item, done) {
   return {
     ...item,
     done,
+    canceled: done ? false : Boolean(item.canceled),
+    cancelReason: done ? "" : item.cancelReason || "",
+    canceledAt: done ? null : item.canceledAt || null,
     completedAt: done ? item.completedAt || new Date().toISOString() : null,
   };
 }
@@ -1242,6 +1288,23 @@ function entryMeta(entry) {
   return formatOptionalDate(entry.date, "未安排");
 }
 
+function entryMetaHtml(entry) {
+  const parts = [escapeHtml(entryMeta(entry))];
+  if (isCanceled(entry)) {
+    const reason = entry.cancelReason ? `：${entry.cancelReason}` : "";
+    parts.push(`<span class="cancel-reason">已取消${escapeHtml(reason)}</span>`);
+  }
+  return parts.join(" · ");
+}
+
+function isCanceled(entry) {
+  return Boolean(entry?.canceled);
+}
+
+function canceledCount(entries) {
+  return entries.filter(isCanceled).length;
+}
+
 function nextNodeText(goal) {
   const open = sortedChildren(goal).filter((child) => !child.done);
   if (!open.length) return goal.children.length ? "所有节点已完成" : "还没有节点";
@@ -1260,9 +1323,12 @@ function createMediumGoal(title) {
     children: [],
     priority: elements.taskPriority.value,
     done: false,
+    canceled: false,
+    cancelReason: "",
     order: nextOrder(),
     createdAt: new Date().toISOString(),
     completedAt: null,
+    canceledAt: null,
   };
 }
 
@@ -1443,9 +1509,12 @@ function normalizeTask(task) {
     children: scope === "medium" ? children : [],
     priority: normalizePriority(task.priority),
     done: Boolean(task.done),
+    canceled: Boolean(task.canceled),
+    cancelReason: typeof task.cancelReason === "string" ? task.cancelReason : "",
     order: normalizeOrder(task),
     createdAt: task.createdAt || new Date().toISOString(),
     completedAt: task.completedAt || null,
+    canceledAt: task.canceledAt || null,
   };
 }
 
@@ -1459,9 +1528,12 @@ function normalizeChildren(children) {
           date: child.date || null,
           priority: normalizePriority(child.priority),
           done: Boolean(child.done),
+          canceled: false,
+          cancelReason: "",
           order: normalizeOrder(child),
           createdAt: child.createdAt || new Date().toISOString(),
           completedAt: child.completedAt || null,
+          canceledAt: null,
         }))
     : [];
 }
@@ -1480,7 +1552,7 @@ function rolloverOpenScheduleTasks() {
   const today = state.selectedDate;
 
   state.tasks = state.tasks.map((task) => {
-    if (!isScheduleTask(task) || task.done || !task.date || task.date >= today) return task;
+    if (!isScheduleTask(task) || task.done || isCanceled(task) || !task.date || task.date >= today) return task;
     changed = true;
     return { ...task, date: today };
   });
@@ -1515,9 +1587,12 @@ function seedTasks() {
       children: [],
       priority: "high",
       done: false,
+      canceled: false,
+      cancelReason: "",
       order: now,
       createdAt: new Date().toISOString(),
       completedAt: null,
+      canceledAt: null,
     },
     {
       id: "seed-2",
@@ -1528,9 +1603,12 @@ function seedTasks() {
       children: [],
       priority: "normal",
       done: false,
+      canceled: false,
+      cancelReason: "",
       order: now + 1,
       createdAt: new Date().toISOString(),
       completedAt: null,
+      canceledAt: null,
     },
     {
       id: "seed-3",
@@ -1541,9 +1619,12 @@ function seedTasks() {
       children: [],
       priority: "normal",
       done: false,
+      canceled: false,
+      cancelReason: "",
       order: now + 2,
       createdAt: new Date().toISOString(),
       completedAt: null,
+      canceledAt: null,
     },
   ];
 }

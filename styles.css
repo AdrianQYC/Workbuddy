@@ -17,6 +17,8 @@
   --priority-urgent-line: #dfaaa4;
   --done-bg: #dfeee6;
   --done-line: #a9cdb9;
+  --canceled-bg: #ece9e3;
+  --canceled-line: #cbc3b7;
   --shadow: 0 18px 50px rgba(30, 45, 41, 0.1);
 }
 
@@ -615,9 +617,18 @@ select:focus {
   background: var(--done-bg);
 }
 
+.task-item.is-canceled {
+  border-color: var(--canceled-line);
+  background: var(--canceled-bg);
+}
+
 .task-item.is-done h3 {
   color: var(--muted);
   text-decoration: line-through;
+}
+
+.task-item.is-canceled h3 {
+  color: var(--muted);
 }
 
 .check-button {
@@ -682,10 +693,30 @@ select:focus {
   color: #2f6546;
 }
 
+.task-item.is-canceled .priority-pill {
+  background: #ded8ce;
+  color: #6c6256;
+}
+
 .task-meta {
   margin-top: 5px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.cancel-reason {
+  color: #6c6256;
+  font-weight: 700;
+}
+
+.cancel-entry-button {
+  color: #7b675d;
+}
+
+.task-item.is-canceled .cancel-entry-button {
+  border-color: var(--canceled-line);
+  background: #f8f6f1;
+  color: #5f554d;
 }
 
 .goal-card {
