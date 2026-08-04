@@ -9,9 +9,8 @@ const state = {
   view: "today",
   statusFilters: {
     today: "all",
-    week: "all",
+    schedule: "all",
     medium: "all",
-    inbox: "all",
   },
   search: {
     keyword: "",
@@ -22,6 +21,7 @@ const state = {
   editing: null,
   expandedGoals: new Set(),
   collapsedSearchGoals: new Set(),
+  scheduleExpandedGroups: new Set(),
   dragging: null,
 };
 
@@ -29,10 +29,9 @@ const elements = {
   todayText: document.querySelector("#todayText"),
   dateStrip: document.querySelector("#dateStrip"),
   todayCount: document.querySelector("#todayCount"),
-  weekCount: document.querySelector("#weekCount"),
+  scheduleCount: document.querySelector("#scheduleCount"),
   mediumCount: document.querySelector("#mediumCount"),
   doneCount: document.querySelector("#doneCount"),
-  inboxCount: document.querySelector("#inboxCount"),
   taskForm: document.querySelector("#taskForm"),
   taskTitle: document.querySelector("#taskTitle"),
   taskScope: document.querySelector("#taskScope"),
@@ -67,9 +66,8 @@ const priorityLabels = {
 
 const viewTitles = {
   today: "今天",
-  week: "本周",
+  schedule: "日程",
   medium: "中期",
-  inbox: "收集箱",
   search: "搜索",
 };
 
@@ -239,9 +237,8 @@ function renderSearchPrioritySelect() {
 
 function renderStats() {
   elements.todayCount.textContent = formatRatio(unitCompletionStats(todayEntries()));
-  elements.weekCount.textContent = formatRatio(unitCompletionStats(weekEntries()));
+  elements.scheduleCount.textContent = formatRatio(unitCompletionStats(scheduleEntries()));
   elements.mediumCount.textContent = formatRatio(goalCompletionStats(allMediumGoals()));
-  elements.inboxCount.textContent = inboxEntries().length;
   elements.doneCount.textContent = totalCompletedUnits();
 }
 
@@ -252,7 +249,7 @@ function renderList() {
   elements.taskList.classList.toggle("is-reorderable", canReorderCurrentView());
   elements.viewTitle.textContent = currentViewTitle();
   elements.viewMeta.textContent = currentViewMeta(entries);
-  elements.emptyState.hidden = entries.length > 0;
+  elements.emptyState.hidden = state.view === "schedule" || entries.length > 0;
 
   if (state.view === "search") {
     renderSearchList(entries);
@@ -261,6 +258,11 @@ function renderList() {
 
   if (state.view === "medium") {
     entries.forEach(renderGoalCard);
+    return;
+  }
+
+  if (state.view === "schedule") {
+    renderScheduleList(entries);
     return;
   }
 
@@ -300,6 +302,97 @@ function renderTaskEntry(entry) {
   schedule.addEventListener("click", () => scheduleEntryToday(entry));
   remove.addEventListener("click", () => deleteEntry(entry));
   elements.taskList.appendChild(node);
+}
+
+function renderScheduleList(entries) {
+  const groups = scheduleGroups(entries);
+  groups.forEach((group) => {
+    const expanded = state.scheduleExpandedGroups.has(group.key);
+
+    const section = document.createElement("section");
+    section.className = "schedule-group";
+    section.classList.toggle("is-empty", group.entries.length === 0);
+
+    const heading = document.createElement("button");
+    heading.className = "schedule-group-heading";
+    heading.type = "button";
+    heading.setAttribute("aria-expanded", String(expanded));
+    heading.addEventListener("click", () => toggleScheduleGroup(group.key));
+
+    const titleWrap = document.createElement("span");
+    titleWrap.className = "schedule-group-title";
+    const indicator = document.createElement("span");
+    indicator.className = `schedule-group-indicator${expanded ? " is-expanded" : ""}`;
+    indicator.textContent = "▶";
+    const title = document.createElement("h3");
+    title.textContent = group.title;
+    titleWrap.append(indicator, title);
+
+    const count = document.createElement("span");
+    count.className = "schedule-group-count";
+    count.textContent = scheduleGroupMeta(group.entries);
+    heading.append(titleWrap, count);
+    section.append(heading);
+
+    const list = document.createElement("div");
+    list.className = "schedule-group-list";
+    list.hidden = !expanded;
+    group.entries.forEach((entry) => {
+      const before = elements.taskList.childElementCount;
+      renderTaskEntry(entry);
+      const rendered = elements.taskList.lastElementChild;
+      if (rendered && elements.taskList.childElementCount > before) list.append(rendered);
+    });
+    if (!group.entries.length) {
+      const empty = document.createElement("div");
+      empty.className = "schedule-group-empty";
+      empty.textContent = "这里没有任务";
+      list.append(empty);
+    }
+    section.append(list);
+    elements.taskList.append(section);
+  });
+}
+
+function scheduleGroups(entries) {
+  const today = state.selectedDate;
+  const withDate = entries.filter((entry) => entry.date);
+  const withoutDate = entries.filter((entry) => !entry.date).sort(sortEntries);
+
+  return [
+    {
+      key: "today",
+      title: "今天",
+      entries: withDate.filter((entry) => entry.date === today).sort(sortEntries),
+    },
+    {
+      key: "future",
+      title: "未来",
+      entries: withDate
+        .filter((entry) => entry.date > today)
+        .sort((a, b) => a.date.localeCompare(b.date) || sortEntries(a, b)),
+    },
+    {
+      key: "past",
+      title: "过去",
+      entries: withDate
+        .filter((entry) => entry.date < today)
+        .sort((a, b) => b.date.localeCompare(a.date) || sortEntries(a, b)),
+    },
+    {
+      key: "unscheduled",
+      title: "未安排",
+      entries: withoutDate,
+    },
+  ];
+}
+
+function scheduleGroupMeta(entries) {
+  if (!entries.length) return "0 项";
+  const stats = unitCompletionStats(entries);
+  const canceled = canceledCount(entries);
+  if (stats.total === 0 && canceled) return `${canceled} 已取消`;
+  return `${formatRatio(stats)} 已完成${canceled ? ` · ${canceled} 已取消` : ""}`;
 }
 
 function renderSearchList(results) {
@@ -824,9 +917,8 @@ function filteredEntries() {
 
 function baseEntriesForView() {
   if (state.view === "today") return todayEntries();
-  if (state.view === "week") return weekEntries();
+  if (state.view === "schedule") return scheduleEntries();
   if (state.view === "medium") return mediumEntries();
-  if (state.view === "inbox") return inboxEntries();
   return taskEntries();
 }
 
@@ -845,22 +937,16 @@ function taskEntries() {
   return state.tasks.filter(isScheduleTask).map((task) => taskEntry(task));
 }
 
+function scheduleEntries() {
+  return taskEntries();
+}
+
 function nodeEntries() {
   return allMediumGoals().flatMap((goal) => goal.children.map((child) => nodeEntry(goal, child)));
 }
 
 function todayEntries() {
   return [...taskEntries(), ...nodeEntries()].filter((entry) => entry.date === state.selectedDate);
-}
-
-function weekEntries() {
-  const start = startOfWeek(new Date());
-  const end = addDays(start, 7);
-  return [...taskEntries(), ...nodeEntries()].filter((entry) => {
-    if (!entry.date) return false;
-    const date = parseISODate(entry.date);
-    return date >= start && date < end;
-  });
 }
 
 function allMediumGoals() {
@@ -873,10 +959,6 @@ function activeMediumGoals() {
 
 function mediumEntries() {
   return allMediumGoals().map((goal) => goalEntry(goal));
-}
-
-function inboxEntries() {
-  return taskEntries().filter((entry) => !entry.date);
 }
 
 function searchResults() {
@@ -984,7 +1066,6 @@ function currentViewTitle() {
 
 function currentViewMeta(entries) {
   if (state.view === "search") return `${countSearchResults(entries)} 项匹配`;
-  if (state.view === "inbox") return `${entries.length} 项`;
   if (state.view === "medium") return `${entries.length} 个目标 · ${formatRatio(goalCompletionStats(allMediumGoals()))} 已完成`;
   const canceled = canceledCount(entries);
   return `${formatRatio(unitCompletionStats(entries))} 已完成${canceled ? ` · ${canceled} 已取消` : ""}`;
@@ -1021,8 +1102,17 @@ function toggleSearchGoalCollapsed(id) {
   render();
 }
 
+function toggleScheduleGroup(key) {
+  if (state.scheduleExpandedGroups.has(key)) {
+    state.scheduleExpandedGroups.delete(key);
+  } else {
+    state.scheduleExpandedGroups.add(key);
+  }
+  render();
+}
+
 function canReorderCurrentView() {
-  return ["today", "week", "medium", "inbox"].includes(state.view) && currentStatusFilter() === "all";
+  return ["today", "medium"].includes(state.view) && currentStatusFilter() === "all";
 }
 
 function setupDraggableElement(element, entry) {
@@ -1596,7 +1686,7 @@ function seedTasks() {
     },
     {
       id: "seed-2",
-      title: "把临时想法放进收集箱",
+      title: "记录一个暂时未安排的想法",
       scope: "schedule",
       date: null,
       dueDate: null,

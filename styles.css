@@ -550,6 +550,81 @@ select:focus {
   gap: 12px;
 }
 
+.schedule-group {
+  display: grid;
+  gap: 8px;
+}
+
+.schedule-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbfa;
+  color: var(--ink);
+  text-align: left;
+}
+
+.schedule-group-heading:hover {
+  border-color: var(--accent);
+}
+
+.schedule-group-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.schedule-group-indicator {
+  color: var(--accent-dark);
+  font-size: 12px;
+  transition: transform 0.16s ease;
+}
+
+.schedule-group-indicator.is-expanded {
+  transform: rotate(90deg);
+}
+
+.schedule-group-heading h3 {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.schedule-group-count {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.schedule-group-list {
+  display: grid;
+  gap: 8px;
+}
+
+.schedule-group-list[hidden] {
+  display: none;
+}
+
+.schedule-group-empty {
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.schedule-group.is-empty .schedule-group-heading {
+  color: var(--muted);
+  background: #fbfcfb;
+}
+
 .task-list.is-reorderable .task-item,
 .task-list.is-reorderable .goal-card,
 .task-list.is-reorderable .node-item {

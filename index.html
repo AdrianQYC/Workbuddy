@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#f8fafc" />
     <title>Workbuddy</title>
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="stylesheet" href="./styles.css?v=26" />
+    <link rel="stylesheet" href="./styles.css?v=28" />
   </head>
   <body>
     <div class="app-shell">
@@ -27,16 +27,12 @@
               <strong id="todayCount">0</strong>
             </div>
             <div class="stat">
-              <span class="stat-label">本周</span>
-              <strong id="weekCount">0</strong>
+              <span class="stat-label">日程</span>
+              <strong id="scheduleCount">0</strong>
             </div>
             <div class="stat">
               <span class="stat-label">中期</span>
               <strong id="mediumCount">0</strong>
-            </div>
-            <div class="stat">
-              <span class="stat-label">待安排</span>
-              <strong id="inboxCount">0</strong>
             </div>
             <div class="stat">
               <span class="stat-label">总完成</span>
@@ -90,9 +86,8 @@
           <div class="toolbar">
             <div class="segments" role="tablist" aria-label="视图">
               <button class="segment is-active" type="button" data-view="today">今天</button>
-              <button class="segment" type="button" data-view="week">本周</button>
+              <button class="segment" type="button" data-view="schedule">日程</button>
               <button class="segment" type="button" data-view="medium">中期</button>
-              <button class="segment" type="button" data-view="inbox">收集箱</button>
               <button class="segment" type="button" data-view="search">搜索</button>
             </div>
           </div>
@@ -166,6 +161,6 @@
       </article>
     </template>
 
-    <script src="./app.js?v=26" type="module"></script>
+    <script src="./app.js?v=28" type="module"></script>
   </body>
 </html>
