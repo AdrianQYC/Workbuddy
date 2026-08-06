@@ -1,12 +1,20 @@
+import { englishWordBanks } from "./english-wordbanks.js";
+
 const storageKey = "workbuddy.tasks.v1";
+const birthdayStorageKey = "workbuddy.birthdays.v1";
+const englishStorageKey = "workbuddy.english.v1";
 const legacyStorageKeys = ["daily-planner.tasks.v1"];
 const importBackupKey = "workbuddy.import-backup.v1";
 const legacyImportBackupKeys = ["daily-planner.import-backup.v1"];
 
 const state = {
   tasks: loadTasks(),
+  birthdays: loadBirthdays(),
+  english: loadEnglish(),
+  module: "planner",
   selectedDate: toISODate(new Date()),
   view: "today",
+  englishView: "today",
   statusFilters: {
     today: "all",
     schedule: "all",
@@ -18,7 +26,16 @@ const state = {
     priority: "all",
     status: "all",
   },
+  englishSearch: "",
+  englishLibraryFilter: "unlearned",
+  englishLibrarySort: "az",
+  englishReview: {
+    bankId: null,
+    wordId: null,
+    revealed: false,
+  },
   editing: null,
+  birthdayEditing: null,
   expandedGoals: new Set(),
   collapsedSearchGoals: new Set(),
   scheduleExpandedGroups: new Set(),
@@ -31,6 +48,7 @@ const elements = {
   todayCount: document.querySelector("#todayCount"),
   scheduleCount: document.querySelector("#scheduleCount"),
   mediumCount: document.querySelector("#mediumCount"),
+  birthdayCount: document.querySelector("#birthdayCount"),
   doneCount: document.querySelector("#doneCount"),
   taskForm: document.querySelector("#taskForm"),
   taskTitle: document.querySelector("#taskTitle"),
@@ -50,12 +68,31 @@ const elements = {
   searchPriority: document.querySelector("#searchPriority"),
   searchStatus: document.querySelector("#searchStatus"),
   clearSearch: document.querySelector("#clearSearch"),
+  moduleButtons: document.querySelectorAll(".module-button"),
+  plannerOverview: document.querySelector("#plannerOverview"),
+  englishOverview: document.querySelector("#englishOverview"),
+  englishTodayCount: document.querySelector("#englishTodayCount"),
+  englishLearnedCount: document.querySelector("#englishLearnedCount"),
+  englishBankCount: document.querySelector("#englishBankCount"),
+  englishGroupCount: document.querySelector("#englishGroupCount"),
+  plannerSegments: document.querySelector("#plannerSegments"),
+  englishSegments: document.querySelector("#englishSegments"),
+  englishSegmentButtons: document.querySelectorAll("[data-english-view]"),
+  birthdayPanel: document.querySelector("#birthdayPanel"),
+  birthdayName: document.querySelector("#birthdayName"),
+  birthdayCalendar: document.querySelector("#birthdayCalendar"),
+  birthdayYear: document.querySelector("#birthdayYear"),
+  birthdayMonth: document.querySelector("#birthdayMonth"),
+  birthdayDay: document.querySelector("#birthdayDay"),
+  birthdayLeapField: document.querySelector("#birthdayLeapField"),
+  birthdayLeap: document.querySelector("#birthdayLeap"),
+  birthdayNote: document.querySelector("#birthdayNote"),
   backupStatus: document.querySelector("#backupStatus"),
   restoreImportBackup: document.querySelector("#restoreImportBackup"),
   exportBtn: document.querySelector("#exportBtn"),
   importInput: document.querySelector("#importInput"),
   taskTemplate: document.querySelector("#taskTemplate"),
-  segments: document.querySelectorAll(".segment"),
+  segments: document.querySelectorAll("[data-view]"),
 };
 
 const priorityLabels = {
@@ -68,15 +105,25 @@ const viewTitles = {
   today: "今天",
   schedule: "日程",
   medium: "中期",
+  birthday: "生日",
   search: "搜索",
 };
+
+const birthdayCalendarLabels = {
+  solar: "公历",
+  lunar: "农历",
+};
+
+const lunarMonthLabels = ["正月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "冬月", "腊月"];
 
 init();
 
 function init() {
   rolloverOpenScheduleTasks();
+  syncBirthdayReminders();
   elements.taskDate.value = state.selectedDate;
   elements.todayText.textContent = formatLongDate(new Date());
+  renderBirthdaySelectOptions();
   bindEvents();
   registerServiceWorker();
   renderBackupState();
@@ -119,9 +166,25 @@ function bindEvents() {
   elements.taskScope.addEventListener("change", renderTaskMode);
   elements.taskPriority.addEventListener("change", renderPrioritySelect);
 
+  elements.moduleButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      state.module = button.dataset.module;
+      if (state.module === "planner") state.view = "today";
+      if (state.module === "english") state.englishView = "today";
+      render();
+    });
+  });
+
   elements.segments.forEach((segment) => {
     segment.addEventListener("click", () => {
       state.view = segment.dataset.view;
+      render();
+    });
+  });
+
+  elements.englishSegmentButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      state.englishView = button.dataset.englishView;
       render();
     });
   });
@@ -160,21 +223,64 @@ function bindEvents() {
     renderList();
   });
 
+  elements.birthdayPanel.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const name = elements.birthdayName.value.trim();
+    if (!name) return;
+
+    state.birthdays.unshift({
+      id: createId(),
+      name,
+      calendar: elements.birthdayCalendar.value,
+      birthYear: normalizeBirthYear(elements.birthdayYear.value),
+      month: Number(elements.birthdayMonth.value),
+      day: Number(elements.birthdayDay.value),
+      isLeapMonth: elements.birthdayCalendar.value === "lunar" && elements.birthdayLeap.checked,
+      note: elements.birthdayNote.value.trim(),
+      reminderDates: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: null,
+    });
+    resetBirthdayForm();
+    saveBirthdays();
+    syncBirthdayReminders();
+    render();
+  });
+  elements.birthdayCalendar.addEventListener("change", () => {
+    renderBirthdaySelectOptions();
+    renderBirthdayFormMode();
+  });
+  elements.birthdayMonth.addEventListener("change", renderBirthdayDayOptions);
+
   elements.exportBtn.addEventListener("click", exportTasks);
   elements.importInput.addEventListener("change", importTasks);
   elements.restoreImportBackup.addEventListener("click", restoreImportBackup);
 }
 
 function render() {
+  renderModules();
   renderDateStrip();
   renderSegments();
+  renderEnglishSegments();
   renderStatusFilters();
   renderSearchPanel();
+  renderBirthdayPanel();
   renderTaskMode();
   renderPrioritySelect();
   renderSearchPrioritySelect();
   renderStats();
   renderList();
+}
+
+function renderModules() {
+  const isPlanner = state.module === "planner";
+  elements.moduleButtons.forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.module === state.module);
+  });
+  elements.plannerOverview.hidden = !isPlanner;
+  elements.englishOverview.hidden = isPlanner;
+  elements.plannerSegments.hidden = !isPlanner;
+  elements.englishSegments.hidden = isPlanner;
 }
 
 function renderDateStrip() {
@@ -201,8 +307,14 @@ function renderSegments() {
   });
 }
 
+function renderEnglishSegments() {
+  elements.englishSegmentButtons.forEach((segment) => {
+    segment.classList.toggle("is-active", segment.dataset.englishView === state.englishView);
+  });
+}
+
 function renderStatusFilters() {
-  const visible = state.view !== "search";
+  const visible = state.module === "planner" && state.view !== "search" && state.view !== "birthday";
   elements.statusFilters.hidden = !visible;
   elements.statusFilterButtons.forEach((button) => {
     button.classList.toggle("is-active", button.dataset.statusFilter === currentStatusFilter());
@@ -210,7 +322,46 @@ function renderStatusFilters() {
 }
 
 function renderSearchPanel() {
-  elements.searchPanel.hidden = state.view !== "search";
+  elements.searchPanel.hidden = state.module !== "planner" || state.view !== "search";
+}
+
+function renderBirthdayPanel() {
+  elements.birthdayPanel.hidden = state.module !== "planner" || state.view !== "birthday";
+}
+
+function renderBirthdayFormMode() {
+  const isLunar = elements.birthdayCalendar.value === "lunar";
+  elements.birthdayLeapField.hidden = !isLunar;
+  if (!isLunar) elements.birthdayLeap.checked = false;
+}
+
+function renderBirthdaySelectOptions() {
+  const currentMonth = elements.birthdayMonth.value || "1";
+  elements.birthdayMonth.innerHTML = "";
+  for (let month = 1; month <= 12; month += 1) {
+    const option = document.createElement("option");
+    option.value = String(month);
+    option.textContent =
+      elements.birthdayCalendar.value === "lunar" ? lunarMonthLabels[month - 1] : `${month} 月`;
+    elements.birthdayMonth.append(option);
+  }
+  elements.birthdayMonth.value = currentMonth;
+  renderBirthdayDayOptions();
+  renderBirthdayFormMode();
+}
+
+function renderBirthdayDayOptions() {
+  const currentDay = elements.birthdayDay.value || "1";
+  const month = Number(elements.birthdayMonth.value || 1);
+  const dayCount = elements.birthdayCalendar.value === "lunar" ? 30 : solarMonthDays(2024, month);
+  elements.birthdayDay.innerHTML = "";
+  for (let day = 1; day <= dayCount; day += 1) {
+    const option = document.createElement("option");
+    option.value = String(day);
+    option.textContent = elements.birthdayCalendar.value === "lunar" ? lunarDayLabel(day) : `${day} 日`;
+    elements.birthdayDay.append(option);
+  }
+  elements.birthdayDay.value = Number(currentDay) <= dayCount ? currentDay : String(dayCount);
 }
 
 function renderTaskMode() {
@@ -239,17 +390,38 @@ function renderStats() {
   elements.todayCount.textContent = formatRatio(unitCompletionStats(todayEntries()));
   elements.scheduleCount.textContent = formatRatio(unitCompletionStats(scheduleEntries()));
   elements.mediumCount.textContent = formatRatio(goalCompletionStats(allMediumGoals()));
+  elements.birthdayCount.textContent = state.birthdays.length;
   elements.doneCount.textContent = totalCompletedUnits();
+  renderEnglishStats();
+}
+
+function renderEnglishStats() {
+  const bank = currentEnglishBank();
+  const stats = englishBankStats(bank.id);
+  elements.englishTodayCount.textContent = todayEnglishWord(bank) ? "1" : "0";
+  elements.englishLearnedCount.textContent = `${stats.learned}/${stats.total}`;
+  elements.englishBankCount.textContent = englishWordBanks.length;
+  elements.englishGroupCount.textContent = state.english.groups.length;
 }
 
 function renderList() {
   const entries = filteredEntries();
   elements.taskList.innerHTML = "";
-  elements.taskList.classList.toggle("is-medium-list", state.view === "medium" || state.view === "search");
+  elements.taskList.classList.toggle("is-medium-list", state.module === "planner" && (state.view === "medium" || state.view === "search"));
   elements.taskList.classList.toggle("is-reorderable", canReorderCurrentView());
   elements.viewTitle.textContent = currentViewTitle();
   elements.viewMeta.textContent = currentViewMeta(entries);
-  elements.emptyState.hidden = state.view === "schedule" || entries.length > 0;
+  elements.emptyState.hidden = state.module === "english" || state.view === "schedule" || entries.length > 0;
+
+  if (state.module === "english") {
+    renderEnglishShell();
+    return;
+  }
+
+  if (state.view === "birthday") {
+    renderBirthdayList(entries);
+    return;
+  }
 
   if (state.view === "search") {
     renderSearchList(entries);
@@ -267,6 +439,489 @@ function renderList() {
   }
 
   entries.forEach(renderTaskEntry);
+}
+
+function renderEnglishShell() {
+  const shell = document.createElement("div");
+  shell.className = "english-shell";
+  if (state.englishView === "library") shell.append(createEnglishLibraryPanel());
+  if (state.englishView === "groups") shell.append(createEnglishGroupsPanel());
+  if (state.englishView === "search") shell.append(createEnglishSearchPanel());
+  if (state.englishView === "review") shell.append(createEnglishReviewPanel());
+  if (state.englishView === "today") shell.append(createEnglishTodayPanel());
+
+  elements.taskList.append(shell);
+}
+
+function createEnglishTodayPanel() {
+  const bank = currentEnglishBank();
+  const word = todayEnglishWord(bank);
+  const panel = createEnglishPanel("今日", "每日认识一个新单词");
+  panel.append(createEnglishBankSelector());
+
+  if (!word) {
+    panel.append(createEnglishEmptyCard(`${bank.name} 词库暂时还没有单词。`));
+    return panel;
+  }
+
+  panel.append(createWordCard(word, bank, { today: true }));
+  return panel;
+}
+
+function createEnglishLibraryPanel() {
+  const bank = currentEnglishBank();
+  const panel = createEnglishPanel("词库", "每个词库单独统计学习情况");
+  panel.append(createEnglishBankSelector());
+
+  const controls = document.createElement("div");
+  controls.className = "english-controls";
+  controls.innerHTML = `
+    <label class="select-field">
+      <span>分类</span>
+      <select id="englishLibraryFilter" aria-label="词库分类">
+        <option value="unlearned"${state.englishLibraryFilter === "unlearned" ? " selected" : ""}>未学</option>
+        <option value="learned"${state.englishLibraryFilter === "learned" ? " selected" : ""}>已学</option>
+        <option value="all"${state.englishLibraryFilter === "all" ? " selected" : ""}>全部</option>
+      </select>
+    </label>
+    <label class="select-field">
+      <span>排序</span>
+      <select id="englishLibrarySort" aria-label="词库排序">
+        <option value="az"${state.englishLibrarySort === "az" ? " selected" : ""}>A-Z</option>
+        <option value="learnedAt"${state.englishLibrarySort === "learnedAt" ? " selected" : ""}>学习日期</option>
+      </select>
+    </label>
+  `;
+  panel.append(controls);
+
+  controls.querySelector("#englishLibraryFilter").addEventListener("change", (event) => {
+    state.englishLibraryFilter = event.target.value;
+    render();
+  });
+  controls.querySelector("#englishLibrarySort").addEventListener("change", (event) => {
+    state.englishLibrarySort = event.target.value;
+    render();
+  });
+
+  const words = filteredEnglishWords(bank);
+  if (!words.length) {
+    panel.append(createEnglishEmptyCard("这里暂时没有符合条件的单词。"));
+    return panel;
+  }
+  const list = document.createElement("div");
+  list.className = "english-word-list";
+  words.slice(0, 80).forEach((word) => list.append(createWordRow(word, bank)));
+  panel.append(list);
+  return panel;
+}
+
+function createEnglishGroupsPanel() {
+  const panel = createEnglishPanel("词组", "近义、反义、形近、义近和自定义分组");
+  const form = document.createElement("form");
+  form.className = "english-group-form";
+  form.innerHTML = `
+    <input name="title" type="text" maxlength="40" placeholder="组名，例如 adapt / adopt / adept" required />
+    <label class="select-field">
+      <span>类型</span>
+      <select name="type" aria-label="词组类型">
+        <option value="形近">形近</option>
+        <option value="近义">近义</option>
+        <option value="反义">反义</option>
+        <option value="义近">义近</option>
+        <option value="同主题">同主题</option>
+        <option value="自定义">自定义</option>
+      </select>
+    </label>
+    <input name="words" type="text" maxlength="120" placeholder="单词，用逗号分隔" required />
+    <input name="note" type="text" maxlength="120" placeholder="备注，可不填" />
+    <button class="primary-button" type="submit">添加</button>
+  `;
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const title = form.elements.title.value.trim();
+    const words = form.elements.words.value
+      .split(/[,，\s]+/)
+      .map((word) => word.trim())
+      .filter(Boolean);
+    if (!title || !words.length) return;
+    state.english.groups.unshift({
+      id: createId(),
+      title,
+      type: form.elements.type.value,
+      words,
+      note: form.elements.note.value.trim(),
+      createdAt: new Date().toISOString(),
+    });
+    saveEnglish();
+    render();
+  });
+  panel.append(form);
+
+  if (!state.english.groups.length) {
+    panel.append(createEnglishEmptyCard("这里以后放成组积累的单词。"));
+    return panel;
+  }
+  const list = document.createElement("div");
+  list.className = "english-word-list";
+  state.english.groups.forEach((group) => list.append(createEnglishGroupCard(group)));
+  panel.append(list);
+  return panel;
+}
+
+function createEnglishSearchPanel() {
+  const panel = createEnglishPanel("搜索", "按单词、释义、备注和词库查找");
+  const controls = document.createElement("div");
+  controls.className = "english-controls";
+  controls.append(createEnglishBankSelector());
+  const input = document.createElement("input");
+  input.type = "search";
+  input.placeholder = "搜索单词、释义或备注";
+  input.value = state.englishSearch;
+  input.addEventListener("input", () => {
+    state.englishSearch = input.value.trim().toLowerCase();
+    renderList();
+  });
+  controls.append(input);
+  panel.append(controls);
+
+  const keyword = state.englishSearch;
+  if (!keyword) {
+    panel.append(createEnglishEmptyCard("输入关键词后显示匹配单词。"));
+    return panel;
+  }
+  const bank = currentEnglishBank();
+  const results = bank.words.filter((word) => {
+    const progress = englishProgressFor(bank.id, word.id);
+    return `${word.word} ${word.translation} ${word.example} ${word.exampleCn || ""} ${progress.note || ""}`
+      .toLowerCase()
+      .includes(keyword);
+  });
+  if (!results.length) {
+    panel.append(createEnglishEmptyCard("没有找到匹配单词。"));
+    return panel;
+  }
+  const list = document.createElement("div");
+  list.className = "english-word-list";
+  results.slice(0, 80).forEach((word) => list.append(createWordRow(word, bank)));
+  panel.append(list);
+  return panel;
+}
+
+function createEnglishReviewPanel() {
+  const bank = currentEnglishBank();
+  const panel = createEnglishPanel("复习", "从当前词库已学单词里抽一个复习");
+  panel.append(createEnglishBankSelector());
+
+  const learnedWords = bank.words.filter((word) => englishProgressFor(bank.id, word.id).learnedAt);
+  if (!learnedWords.length) {
+    panel.append(createEnglishEmptyCard("当前词库还没有已学单词。先在“今日”或“词库”里标记已学后再复习。"));
+    return panel;
+  }
+
+  const word = currentReviewWord(bank, learnedWords);
+  if (!word) {
+    panel.append(createEnglishEmptyCard("暂时没有可复习的单词。"));
+    return panel;
+  }
+
+  if (!state.englishReview.revealed) {
+    const card = document.createElement("article");
+    card.className = "english-word-card english-review-prompt";
+    card.innerHTML = `
+      <div class="english-word-head">
+        <div>
+          <h3>${escapeHtml(word.word)}</h3>
+        </div>
+      </div>
+      <div class="english-word-actions">
+        <button class="save-button" type="button" data-review-result="known">认识</button>
+        <button class="cancel-button" type="button" data-review-result="unknown">不认识</button>
+      </div>
+    `;
+    card.querySelector('[data-review-result="known"]').addEventListener("click", () => recordEnglishReview(bank.id, word.id, true));
+    card.querySelector('[data-review-result="unknown"]').addEventListener("click", () => recordEnglishReview(bank.id, word.id, false));
+    panel.append(card);
+    return panel;
+  }
+
+  panel.append(createWordCard(word, bank));
+  const next = document.createElement("button");
+  next.className = "cancel-button";
+  next.type = "button";
+  next.textContent = "下一个复习";
+  next.addEventListener("click", () => {
+    selectReviewWord(bank, true);
+    render();
+  });
+  panel.append(next);
+  return panel;
+}
+
+function createEnglishPanel(title, meta) {
+  const panel = document.createElement("section");
+  panel.className = "english-panel";
+  const heading = document.createElement("div");
+  heading.className = "english-panel-heading";
+  heading.innerHTML = `<h3>${title}</h3><span>${meta}</span>`;
+  panel.append(heading);
+  return panel;
+}
+
+function createEnglishBankSelector() {
+  const field = document.createElement("label");
+  field.className = "select-field english-bank-select";
+  field.innerHTML = `
+    <span>词库</span>
+    <select aria-label="选择词库">
+      ${englishWordBanks
+        .map((bank) => `<option value="${bank.id}"${bank.id === state.english.selectedBankId ? " selected" : ""}>${bank.name}</option>`)
+        .join("")}
+    </select>
+  `;
+  field.querySelector("select").addEventListener("change", (event) => {
+    state.english.selectedBankId = event.target.value;
+    state.englishReview = { bankId: event.target.value, wordId: null, revealed: false };
+    saveEnglish();
+    render();
+  });
+  return field;
+}
+
+function createWordCard(word, bank, options = {}) {
+  const progress = englishProgressFor(bank.id, word.id);
+  const card = document.createElement("article");
+  card.className = `english-word-card${progress.learnedAt ? " is-learned" : ""}`;
+  card.innerHTML = `
+    <div class="english-word-head">
+      <div>
+        <h3>${escapeHtml(word.word)}</h3>
+        <span>${word.phonetic || "音标待补充"}</span>
+      </div>
+      <div class="word-preview-actions">
+        <button class="icon-button small" type="button" data-accent="en-US" title="美式发音">美</button>
+        <button class="icon-button small" type="button" data-accent="en-GB" title="英式发音">英</button>
+      </div>
+    </div>
+    <div class="english-word-meaning">${escapeHtml(word.translation)}</div>
+    <div class="english-word-example">${escapeHtml(word.example)}</div>
+    ${word.exampleCn ? `<div class="english-word-example-cn">例句中文：${escapeHtml(word.exampleCn)}</div>` : ""}
+    <div class="english-review-count">复习：${progress.knownCount || 0}/${progress.reviewCount || 0}</div>
+    <textarea class="english-note-input" maxlength="180" placeholder="我的备注，可不填">${escapeHtml(progress.note || "")}</textarea>
+    <div class="english-word-actions">
+      <button class="save-button" type="button" data-action="save-note">保存备注</button>
+      <button class="save-button" type="button" data-action="learned">${progress.learnedAt ? "已学过" : "认识了"}</button>
+      ${options.today ? '<button class="cancel-button" type="button" data-action="change-word">换一个</button>' : ""}
+    </div>
+  `;
+  bindEnglishWordActions(card, word, bank);
+  return card;
+}
+
+function createWordRow(word, bank) {
+  const progress = englishProgressFor(bank.id, word.id);
+  const row = document.createElement("article");
+  row.className = `english-word-row${progress.learnedAt ? " is-learned" : ""}`;
+  row.innerHTML = `
+    <div>
+      <div class="english-row-title">
+        <strong>${escapeHtml(word.word)}</strong>
+        <span>${word.phonetic || "音标待补充"}</span>
+      </div>
+      <div class="english-row-meta">${escapeHtml(word.translation)}</div>
+      <div class="english-row-meta">${progress.learnedAt ? `学习日期：${formatTaskDate(progress.learnedAt.slice(0, 10))}` : "未学"}</div>
+      <div class="english-row-meta">复习：${progress.knownCount || 0}/${progress.reviewCount || 0}</div>
+    </div>
+    <div class="word-preview-actions">
+      <button class="icon-button small" type="button" data-accent="en-US" title="美式发音">美</button>
+      <button class="icon-button small" type="button" data-accent="en-GB" title="英式发音">英</button>
+      <button class="icon-button small" type="button" data-action="learned" title="${progress.learnedAt ? "已学过" : "标记已学"}">✓</button>
+    </div>
+  `;
+  bindEnglishWordActions(row, word, bank);
+  return row;
+}
+
+function createEnglishGroupCard(group) {
+  const card = document.createElement("article");
+  card.className = "english-group-card";
+  card.innerHTML = `
+    <div>
+      <div class="english-row-title">
+        <strong>${escapeHtml(group.title)}</strong>
+        <span>${escapeHtml(group.type)}</span>
+      </div>
+      <div class="english-row-meta">${group.words.map(escapeHtml).join(" / ")}</div>
+      ${group.note ? `<div class="english-row-meta">${escapeHtml(group.note)}</div>` : ""}
+    </div>
+    <button class="icon-button small" type="button" aria-label="删除词组" title="删除词组">×</button>
+  `;
+  card.querySelector("button").addEventListener("click", () => {
+    state.english.groups = state.english.groups.filter((item) => item.id !== group.id);
+    saveEnglish();
+    render();
+  });
+  return card;
+}
+
+function createEnglishEmptyCard(text) {
+  const card = document.createElement("div");
+  card.className = "english-empty-card";
+  card.textContent = text;
+  return card;
+}
+
+function bindEnglishWordActions(container, word, bank) {
+  container.querySelectorAll("[data-accent]").forEach((button) => {
+    button.addEventListener("click", () => speakEnglish(word.word, button.dataset.accent));
+  });
+  container.querySelectorAll('[data-action="learned"]').forEach((button) => {
+    button.addEventListener("click", () => markEnglishWordLearned(bank.id, word.id));
+  });
+  const saveNote = container.querySelector('[data-action="save-note"]');
+  if (saveNote) {
+    saveNote.addEventListener("click", () => {
+      const note = container.querySelector(".english-note-input")?.value.trim() || "";
+      updateEnglishProgress(bank.id, word.id, { note });
+      render();
+    });
+  }
+  const changeWord = container.querySelector('[data-action="change-word"]');
+  if (changeWord) {
+    changeWord.addEventListener("click", () => {
+      setTodayEnglishWord(bank, true);
+      saveEnglish();
+      render();
+    });
+  }
+}
+
+function currentEnglishBank() {
+  return englishWordBanks.find((bank) => bank.id === state.english.selectedBankId) || englishWordBanks[0];
+}
+
+function englishBankStats(bankId) {
+  const bank = englishWordBanks.find((item) => item.id === bankId) || englishWordBanks[0];
+  const progress = state.english.progress[bankId] || {};
+  return {
+    learned: Object.values(progress).filter((item) => item.learnedAt).length,
+    total: bank.words.length,
+  };
+}
+
+function todayEnglishWord(bank) {
+  const today = state.selectedDate;
+  const record = state.english.today[bank.id];
+  if (record?.date === today) {
+    const existing = bank.words.find((word) => word.id === record.wordId);
+    if (existing) return existing;
+  }
+  return setTodayEnglishWord(bank, false);
+}
+
+function setTodayEnglishWord(bank, forceChange) {
+  if (!bank.words.length) return null;
+  const today = state.selectedDate;
+  const currentWordId = state.english.today[bank.id]?.wordId;
+  const openWords = bank.words.filter((word) => !englishProgressFor(bank.id, word.id).learnedAt);
+  const pool = (openWords.length ? openWords : bank.words).filter((word) => !forceChange || word.id !== currentWordId);
+  const selected = pool[Math.floor(Math.random() * pool.length)] || bank.words[0];
+  state.english.today[bank.id] = { date: today, wordId: selected.id };
+  saveEnglish();
+  return selected;
+}
+
+function filteredEnglishWords(bank) {
+  let words = [...bank.words];
+  if (state.englishLibraryFilter === "learned") {
+    words = words.filter((word) => englishProgressFor(bank.id, word.id).learnedAt);
+  }
+  if (state.englishLibraryFilter === "unlearned") {
+    words = words.filter((word) => !englishProgressFor(bank.id, word.id).learnedAt);
+  }
+  if (state.englishLibrarySort === "learnedAt") {
+    words.sort((a, b) => {
+      const first = englishProgressFor(bank.id, a.id).learnedAt || "";
+      const second = englishProgressFor(bank.id, b.id).learnedAt || "";
+      return second.localeCompare(first) || a.word.localeCompare(b.word);
+    });
+  } else {
+    words.sort((a, b) => a.word.localeCompare(b.word));
+  }
+  return words;
+}
+
+function currentReviewWord(bank, learnedWords) {
+  if (state.englishReview.bankId !== bank.id) {
+    return selectReviewWord(bank, false, learnedWords);
+  }
+  const current = learnedWords.find((word) => word.id === state.englishReview.wordId);
+  if (current) return current;
+  return selectReviewWord(bank, false, learnedWords);
+}
+
+function selectReviewWord(bank, forceChange, learnedWords = null) {
+  const words = learnedWords || bank.words.filter((word) => englishProgressFor(bank.id, word.id).learnedAt);
+  if (!words.length) return null;
+  const pool = forceChange ? words.filter((word) => word.id !== state.englishReview.wordId) : words;
+  const selected = (pool.length ? pool : words)[Math.floor(Math.random() * (pool.length ? pool.length : words.length))];
+  state.englishReview = {
+    bankId: bank.id,
+    wordId: selected.id,
+    revealed: false,
+  };
+  return selected;
+}
+
+function recordEnglishReview(bankId, wordId, known) {
+  const progress = englishProgressFor(bankId, wordId);
+  updateEnglishProgress(bankId, wordId, {
+    reviewCount: (progress.reviewCount || 0) + 1,
+    knownCount: (progress.knownCount || 0) + (known ? 1 : 0),
+  });
+  state.englishReview = {
+    bankId,
+    wordId,
+    revealed: true,
+  };
+  render();
+}
+
+function englishProgressFor(bankId, wordId) {
+  return state.english.progress[bankId]?.[wordId] || {};
+}
+
+function markEnglishWordLearned(bankId, wordId) {
+  const current = englishProgressFor(bankId, wordId);
+  updateEnglishProgress(bankId, wordId, { learnedAt: current.learnedAt || new Date().toISOString() });
+  render();
+}
+
+function updateEnglishProgress(bankId, wordId, updates) {
+  state.english.progress = {
+    ...state.english.progress,
+    [bankId]: {
+      ...(state.english.progress[bankId] || {}),
+      [wordId]: {
+        ...englishProgressFor(bankId, wordId),
+        ...updates,
+      },
+    },
+  };
+  saveEnglish();
+}
+
+function speakEnglish(text, lang) {
+  if (!("speechSynthesis" in window)) return;
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = lang;
+  const voices = speechSynthesis.getVoices();
+  const voice =
+    voices.find((item) => item.lang === lang) ||
+    voices.find((item) => item.lang?.toLowerCase().startsWith(lang.toLowerCase())) ||
+    voices.find((item) => item.lang?.toLowerCase().startsWith(lang.slice(0, 2).toLowerCase()));
+  if (voice) utterance.voice = voice;
+  speechSynthesis.cancel();
+  speechSynthesis.speak(utterance);
 }
 
 function renderTaskEntry(entry) {
@@ -910,8 +1565,170 @@ function createNodeItem(goal, child) {
   return item;
 }
 
+function renderBirthdayList(entries) {
+  entries.forEach((entry) => {
+    if (state.birthdayEditing === entry.id) {
+      elements.taskList.append(createBirthdayEditor(entry));
+      return;
+    }
+    elements.taskList.append(createBirthdayCard(entry));
+  });
+}
+
+function createBirthdayCard(entry) {
+  const card = document.createElement("article");
+  card.className = `birthday-card${entry.isNextBirthday ? " is-next" : ""}`;
+
+  const body = document.createElement("div");
+  body.className = "task-body";
+
+  const title = document.createElement("div");
+  title.className = "birthday-title";
+  title.innerHTML = `<h3>${escapeHtml(entry.name)}</h3><span class="birthday-pill">${birthdayCalendarLabels[entry.calendar]}</span>`;
+
+  const meta = document.createElement("div");
+  meta.className = "birthday-meta";
+  const reminderText = entry.occurrence?.reminderGenerated ? "已生成中期提醒" : "生日前 30 天自动生成中期提醒";
+  meta.innerHTML = `
+    ${entry.isNextBirthday ? "<span>最近生日</span>" : ""}
+    ${entry.birthYear ? `<span>年份：${entry.birthYear}</span>` : ""}
+    <span>${escapeHtml(formatBirthdayDate(entry))}</span>
+    <span>下次：${entry.occurrence ? formatTaskDate(entry.occurrence.iso) : "暂时无法换算"}</span>
+    <span>${entry.occurrence ? formatDaysUntil(entry.occurrence.daysUntil) : "请检查日期"}</span>
+    <span>${reminderText}</span>
+  `;
+
+  body.append(title, meta);
+  if (entry.note) {
+    const note = document.createElement("div");
+    note.className = "birthday-note";
+    note.textContent = entry.note;
+    body.append(note);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "task-actions";
+  const edit = document.createElement("button");
+  edit.className = "icon-button small";
+  edit.type = "button";
+  edit.title = "修改生日";
+  edit.setAttribute("aria-label", "修改生日");
+  edit.textContent = "✎";
+  edit.addEventListener("click", () => {
+    state.birthdayEditing = entry.id;
+    render();
+  });
+  const remove = document.createElement("button");
+  remove.className = "icon-button small";
+  remove.type = "button";
+  remove.title = "删除生日";
+  remove.setAttribute("aria-label", "删除生日");
+  remove.textContent = "×";
+  remove.addEventListener("click", () => deleteBirthday(entry.id));
+  actions.append(edit, remove);
+
+  card.append(body, actions);
+  return card;
+}
+
+function createBirthdayEditor(entry) {
+  const wrapper = document.createElement("article");
+  wrapper.className = "birthday-card birthday-edit-card";
+  wrapper.innerHTML = `
+    <form class="birthday-edit-form">
+      <input name="name" type="text" maxlength="40" value="${escapeHtml(entry.name)}" aria-label="姓名" required />
+      <label class="select-field">
+        <span>历法</span>
+        <select name="calendar" aria-label="生日历法">
+          <option value="solar"${entry.calendar === "solar" ? " selected" : ""}>公历</option>
+          <option value="lunar"${entry.calendar === "lunar" ? " selected" : ""}>农历</option>
+        </select>
+      </label>
+      <label class="date-field birthday-year-field">
+        <span>年份</span>
+        <input name="birthYear" type="number" min="1" max="9999" value="${entry.birthYear || ""}" aria-label="年份" placeholder="可不填" />
+      </label>
+      <label class="select-field">
+        <span>月份</span>
+        <select name="month" aria-label="生日月份"></select>
+      </label>
+      <label class="select-field">
+        <span>日期</span>
+        <select name="day" aria-label="生日日期"></select>
+      </label>
+      <label class="leap-field edit-leap-field">
+        <input name="isLeapMonth" type="checkbox"${entry.isLeapMonth ? " checked" : ""} />
+        <span>闰月</span>
+      </label>
+      <input class="birthday-edit-note" name="note" type="text" maxlength="80" value="${escapeHtml(entry.note)}" aria-label="备注" placeholder="备注，可不填" />
+      <div class="edit-actions">
+        <button class="save-button" type="submit">保存</button>
+        <button class="cancel-button" type="button">取消</button>
+      </div>
+    </form>
+  `;
+
+  const form = wrapper.querySelector(".birthday-edit-form");
+  const calendar = form.elements.calendar;
+  const month = form.elements.month;
+  const day = form.elements.day;
+  const leapField = wrapper.querySelector(".edit-leap-field");
+
+  const renderEditorOptions = () => {
+    const selectedMonth = month.value || String(entry.month);
+    const selectedDay = day.value || String(entry.day);
+    month.innerHTML = "";
+    for (let value = 1; value <= 12; value += 1) {
+      const option = document.createElement("option");
+      option.value = String(value);
+      option.textContent = calendar.value === "lunar" ? lunarMonthLabels[value - 1] : `${value} 月`;
+      month.append(option);
+    }
+    month.value = selectedMonth;
+    const dayCount = calendar.value === "lunar" ? 30 : solarMonthDays(2024, Number(month.value));
+    day.innerHTML = "";
+    for (let value = 1; value <= dayCount; value += 1) {
+      const option = document.createElement("option");
+      option.value = String(value);
+      option.textContent = calendar.value === "lunar" ? lunarDayLabel(value) : `${value} 日`;
+      day.append(option);
+    }
+    day.value = Number(selectedDay) <= dayCount ? selectedDay : String(dayCount);
+    leapField.hidden = calendar.value !== "lunar";
+    if (calendar.value !== "lunar") form.elements.isLeapMonth.checked = false;
+  };
+
+  renderEditorOptions();
+  month.value = String(entry.month);
+  day.value = String(entry.day);
+  calendar.addEventListener("change", renderEditorOptions);
+  month.addEventListener("change", renderEditorOptions);
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const name = form.elements.name.value.trim();
+    if (!name) return;
+    updateBirthday(entry.id, {
+      name,
+      calendar: form.elements.calendar.value,
+      birthYear: normalizeBirthYear(form.elements.birthYear.value),
+      month: Number(form.elements.month.value),
+      day: Number(form.elements.day.value),
+      isLeapMonth: form.elements.calendar.value === "lunar" && form.elements.isLeapMonth.checked,
+      note: form.elements.note.value.trim(),
+    });
+  });
+  wrapper.querySelector(".cancel-button").addEventListener("click", () => {
+    state.birthdayEditing = null;
+    render();
+  });
+  return wrapper;
+}
+
 function filteredEntries() {
+  if (state.module === "english") return [];
   if (state.view === "search") return searchResults();
+  if (state.view === "birthday") return birthdayEntries();
   return filterByStatus(baseEntriesForView(), currentStatusFilter()).sort(sortEntries);
 }
 
@@ -959,6 +1776,33 @@ function activeMediumGoals() {
 
 function mediumEntries() {
   return allMediumGoals().map((goal) => goalEntry(goal));
+}
+
+function birthdayEntries() {
+  const entries = state.birthdays.map((birthday) => {
+      const occurrence = nextBirthdayOccurrence(birthday, state.selectedDate);
+      return {
+        ...birthday,
+        occurrence: occurrence
+          ? {
+              ...occurrence,
+              reminderGenerated: birthday.reminderDates.includes(occurrence.iso),
+            }
+          : null,
+      };
+    });
+  const closestDays = Math.min(
+    ...entries
+      .map((entry) => entry.occurrence?.daysUntil)
+      .filter((days) => Number.isFinite(days)),
+  );
+
+  return entries
+    .map((entry) => ({
+      ...entry,
+      isNextBirthday: Number.isFinite(closestDays) && entry.occurrence?.daysUntil === closestDays,
+    }))
+    .sort(sortBirthdaysByAnnualDate);
 }
 
 function searchResults() {
@@ -1060,12 +1904,24 @@ function formatRatio(stats) {
 }
 
 function currentViewTitle() {
+  if (state.module === "english") {
+    const titles = {
+      today: "每日英语",
+      review: "复习",
+      library: "词库",
+      groups: "词组",
+      search: "英语搜索",
+    };
+    return titles[state.englishView] || "每日英语";
+  }
   if (state.view === "today") return formatShortDate(parseISODate(state.selectedDate));
   return viewTitles[state.view];
 }
 
 function currentViewMeta(entries) {
+  if (state.module === "english") return "模块骨架";
   if (state.view === "search") return `${countSearchResults(entries)} 项匹配`;
+  if (state.view === "birthday") return `${entries.length} 个生日`;
   if (state.view === "medium") return `${entries.length} 个目标 · ${formatRatio(goalCompletionStats(allMediumGoals()))} 已完成`;
   const canceled = canceledCount(entries);
   return `${formatRatio(unitCompletionStats(entries))} 已完成${canceled ? ` · ${canceled} 已取消` : ""}`;
@@ -1073,6 +1929,14 @@ function currentViewMeta(entries) {
 
 function countSearchResults(results) {
   return results.reduce((total, result) => total + (result.kind === "task" ? 1 : 1 + result.children.length), 0);
+}
+
+function sortBirthdaysByAnnualDate(a, b) {
+  if (a.month !== b.month) return a.month - b.month;
+  if (a.day !== b.day) return a.day - b.day;
+  if (a.calendar !== b.calendar) return a.calendar === "solar" ? -1 : 1;
+  if (a.isLeapMonth !== b.isLeapMonth) return a.isLeapMonth ? 1 : -1;
+  return (a.createdAt || "").localeCompare(b.createdAt || "");
 }
 
 function sortEntries(a, b) {
@@ -1112,7 +1976,7 @@ function toggleScheduleGroup(key) {
 }
 
 function canReorderCurrentView() {
-  return ["today", "medium"].includes(state.view) && currentStatusFilter() === "all";
+  return state.module === "planner" && ["today", "medium"].includes(state.view) && currentStatusFilter() === "all";
 }
 
 function setupDraggableElement(element, entry) {
@@ -1281,6 +2145,34 @@ function addNode(goalId, child) {
   render();
 }
 
+function updateBirthday(id, updates) {
+  state.birthdays = state.birthdays.map((birthday) => {
+    if (birthday.id !== id) return birthday;
+    const dateChanged =
+      birthday.calendar !== updates.calendar ||
+      birthday.month !== updates.month ||
+      birthday.day !== updates.day ||
+      birthday.isLeapMonth !== updates.isLeapMonth;
+    return {
+      ...birthday,
+      ...updates,
+      reminderDates: dateChanged ? [] : birthday.reminderDates,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+  state.birthdayEditing = null;
+  saveBirthdays();
+  syncBirthdayReminders();
+  render();
+}
+
+function deleteBirthday(id) {
+  state.birthdays = state.birthdays.filter((birthday) => birthday.id !== id);
+  state.birthdayEditing = null;
+  saveBirthdays();
+  render();
+}
+
 function scheduleEntryToday(entry) {
   if (entry.kind === "task") scheduleTaskToday(entry.id);
   if (entry.kind === "node") scheduleNodeToday(entry.parentId, entry.id);
@@ -1422,6 +2314,51 @@ function createMediumGoal(title) {
   };
 }
 
+function createBirthdayGoal(birthday, occurrence, orderOffset = 0) {
+  const dueDate = parseISODate(occurrence.iso);
+  const firstNodeDate = maxISODate(state.selectedDate, toISODate(addDays(dueDate, -21)));
+  const secondNodeDate = maxISODate(state.selectedDate, toISODate(addDays(dueDate, -7)));
+  const order = nextOrder() + orderOffset * 4;
+  return {
+    id: createId(),
+    title: `准备${birthday.name}生日`,
+    scope: "medium",
+    date: null,
+    dueDate: occurrence.iso,
+    children: [
+      createBirthdayNode("确认生日安排", firstNodeDate, "normal", order + 1),
+      createBirthdayNode("准备礼物或祝福", secondNodeDate, "high", order + 2),
+      createBirthdayNode("生日当天祝福", occurrence.iso, "high", order + 3),
+    ],
+    priority: "high",
+    done: false,
+    canceled: false,
+    cancelReason: "",
+    order,
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+    canceledAt: null,
+    source: {
+      type: "birthday",
+      birthdayId: birthday.id,
+      birthdayDate: occurrence.iso,
+    },
+  };
+}
+
+function createBirthdayNode(title, date, priority, order) {
+  return {
+    id: createId(),
+    title,
+    date,
+    priority,
+    done: false,
+    order,
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+  };
+}
+
 function isScheduleTask(task) {
   return task.scope !== "medium";
 }
@@ -1435,19 +2372,39 @@ function resetTaskForm() {
   renderPrioritySelect();
 }
 
+function resetBirthdayForm() {
+  elements.birthdayName.value = "";
+  elements.birthdayCalendar.value = "solar";
+  elements.birthdayYear.value = "";
+  elements.birthdayMonth.value = "1";
+  elements.birthdayDay.value = "1";
+  elements.birthdayLeap.checked = false;
+  elements.birthdayNote.value = "";
+  renderBirthdaySelectOptions();
+}
+
 async function exportTasks() {
   const exportedAt = new Date();
   const filename = `Workbuddy-${formatFileStamp(exportedAt)}.json`;
-  const blob = new Blob([JSON.stringify({ exportedAt: exportedAt.toISOString(), tasks: state.tasks }, null, 2)], {
-    type: "application/json",
-  });
+  const blob = new Blob(
+    [
+      JSON.stringify(
+        { exportedAt: exportedAt.toISOString(), tasks: state.tasks, birthdays: state.birthdays, english: state.english },
+        null,
+        2,
+      ),
+    ],
+    {
+      type: "application/json",
+    },
+  );
   const file = new File([blob], filename, { type: "application/json" });
 
   if (navigator.canShare?.({ files: [file] })) {
     try {
       await navigator.share({
         title: "Workbuddy 备份",
-        text: "Workbuddy 任务数据备份",
+        text: "Workbuddy 数据备份",
         files: [file],
       });
       showBackupStatus("已打开手机保存/分享面板");
@@ -1479,7 +2436,7 @@ function importTasks(event) {
   const file = event.target.files?.[0];
   if (!file) return;
 
-  const shouldImport = confirm("导入备份会覆盖当前任务。建议先确认当前数据已经导出到坚果云。继续导入吗？");
+  const shouldImport = confirm("导入备份会覆盖当前任务、生日和英语学习数据。建议先确认当前数据已经导出到坚果云。继续导入吗？");
   if (!shouldImport) {
     event.target.value = "";
     return;
@@ -1492,7 +2449,11 @@ function importTasks(event) {
       if (!Array.isArray(parsed.tasks)) throw new Error("Invalid file");
       saveImportBackup();
       state.tasks = normalizeTasks(parsed.tasks).filter((task) => task.title && typeof task.title === "string");
+      state.birthdays = normalizeBirthdays(parsed.birthdays);
+      state.english = normalizeEnglish(parsed.english);
       saveTasks();
+      saveBirthdays();
+      saveEnglish();
       renderBackupState();
       render();
       showBackupStatus(`已导入：${file.name}`);
@@ -1512,6 +2473,8 @@ function saveImportBackup() {
     JSON.stringify({
       savedAt: new Date().toISOString(),
       tasks: state.tasks,
+      birthdays: state.birthdays,
+      english: state.english,
     }),
   );
 }
@@ -1519,14 +2482,18 @@ function saveImportBackup() {
 function restoreImportBackup() {
   const raw = readImportBackup();
   if (!raw) return;
-  const shouldRestore = confirm("这会用最近一次导入前的本机数据覆盖当前任务。继续恢复吗？");
+  const shouldRestore = confirm("这会用最近一次导入前的本机数据覆盖当前任务、生日和英语学习数据。继续恢复吗？");
   if (!shouldRestore) return;
 
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed.tasks)) throw new Error("Invalid backup");
     state.tasks = normalizeTasks(parsed.tasks).filter((task) => task.title && typeof task.title === "string");
+    state.birthdays = normalizeBirthdays(parsed.birthdays);
+    state.english = normalizeEnglish(parsed.english);
     saveTasks();
+    saveBirthdays();
+    saveEnglish();
     render();
     showBackupStatus("已恢复导入前数据");
   } catch {
@@ -1573,6 +2540,26 @@ function loadTasks() {
   }
 }
 
+function loadBirthdays() {
+  try {
+    const raw = localStorage.getItem(birthdayStorageKey);
+    if (raw) return normalizeBirthdays(JSON.parse(raw));
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+function loadEnglish() {
+  try {
+    const raw = localStorage.getItem(englishStorageKey);
+    if (raw) return normalizeEnglish(JSON.parse(raw));
+    return normalizeEnglish();
+  } catch {
+    return normalizeEnglish();
+  }
+}
+
 function readFirstLocalStorageValue(keys) {
   for (const key of keys) {
     const value = localStorage.getItem(key);
@@ -1585,6 +2572,79 @@ function normalizeTasks(tasks) {
   return Array.isArray(tasks)
     ? tasks.map(normalizeTask).map((task) => (task.scope === "medium" ? syncGoalDone(task) : task))
     : seedTasks();
+}
+
+function normalizeBirthdays(birthdays) {
+  if (!Array.isArray(birthdays)) return [];
+  return birthdays
+    .filter((birthday) => birthday?.name && typeof birthday.name === "string")
+    .map((birthday) => {
+      const calendar = birthday.calendar === "lunar" ? "lunar" : "solar";
+      const month = clampInteger(birthday.month, 1, 12, 1);
+      const day = clampInteger(birthday.day, 1, calendar === "lunar" ? 30 : 31, 1);
+      return {
+        ...birthday,
+        id: birthday.id || createId(),
+        name: birthday.name,
+        calendar,
+        birthYear: normalizeBirthYear(birthday.birthYear),
+        month,
+        day,
+        isLeapMonth: calendar === "lunar" && Boolean(birthday.isLeapMonth),
+        note: typeof birthday.note === "string" ? birthday.note : "",
+        reminderDates: Array.isArray(birthday.reminderDates) ? birthday.reminderDates.filter(Boolean) : [],
+        createdAt: birthday.createdAt || new Date().toISOString(),
+        updatedAt: birthday.updatedAt || null,
+      };
+    });
+}
+
+function normalizeEnglish(english = {}) {
+  const selectedBankId = englishWordBanks.some((bank) => bank.id === english.selectedBankId)
+    ? english.selectedBankId
+    : englishWordBanks[0].id;
+  return {
+    selectedBankId,
+    today: typeof english.today === "object" && english.today ? english.today : {},
+    progress: normalizeEnglishProgress(english.progress),
+    groups: normalizeEnglishGroups(english.groups),
+  };
+}
+
+function normalizeEnglishProgress(progress) {
+  if (!progress || typeof progress !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(progress).map(([bankId, words]) => [
+      bankId,
+      words && typeof words === "object"
+        ? Object.fromEntries(
+            Object.entries(words).map(([wordId, item]) => [
+              wordId,
+              {
+                learnedAt: typeof item?.learnedAt === "string" ? item.learnedAt : null,
+                note: typeof item?.note === "string" ? item.note : "",
+                reviewCount: normalizeNonNegativeInteger(item?.reviewCount),
+                knownCount: normalizeNonNegativeInteger(item?.knownCount),
+              },
+            ]),
+          )
+        : {},
+    ]),
+  );
+}
+
+function normalizeEnglishGroups(groups) {
+  if (!Array.isArray(groups)) return [];
+  return groups
+    .filter((group) => group?.title && Array.isArray(group.words))
+    .map((group) => ({
+      id: group.id || createId(),
+      title: String(group.title),
+      type: typeof group.type === "string" ? group.type : "自定义",
+      words: group.words.map(String).filter(Boolean),
+      note: typeof group.note === "string" ? group.note : "",
+      createdAt: group.createdAt || new Date().toISOString(),
+    }));
 }
 
 function normalizeTask(task) {
@@ -1637,6 +2697,14 @@ function saveTasks() {
   localStorage.setItem(storageKey, JSON.stringify(state.tasks));
 }
 
+function saveBirthdays() {
+  localStorage.setItem(birthdayStorageKey, JSON.stringify(state.birthdays));
+}
+
+function saveEnglish() {
+  localStorage.setItem(englishStorageKey, JSON.stringify(state.english));
+}
+
 function rolloverOpenScheduleTasks() {
   let changed = false;
   const today = state.selectedDate;
@@ -1648,6 +2716,31 @@ function rolloverOpenScheduleTasks() {
   });
 
   if (changed) saveTasks();
+}
+
+function syncBirthdayReminders() {
+  const today = state.selectedDate;
+  let birthdaysChanged = false;
+  const goals = [];
+
+  state.birthdays = state.birthdays.map((birthday) => {
+    const occurrence = nextBirthdayOccurrence(birthday, today);
+    if (!occurrence || occurrence.daysUntil > 30 || birthday.reminderDates.includes(occurrence.iso)) return birthday;
+
+    goals.push(createBirthdayGoal(birthday, occurrence, goals.length));
+    birthdaysChanged = true;
+    return {
+      ...birthday,
+      reminderDates: [...birthday.reminderDates, occurrence.iso],
+      updatedAt: new Date().toISOString(),
+    };
+  });
+
+  if (goals.length) {
+    state.tasks = [...goals, ...state.tasks];
+    saveTasks();
+  }
+  if (birthdaysChanged) saveBirthdays();
 }
 
 function nextOrder() {
@@ -1803,9 +2896,150 @@ function formatOptionalDate(date, fallback) {
   return formatTaskDate(date);
 }
 
+function formatBirthdayDate(birthday) {
+  if (birthday.calendar === "lunar") {
+    const leap = birthday.isLeapMonth ? "闰" : "";
+    return `农历 ${leap}${lunarMonthLabels[birthday.month - 1]}${lunarDayLabel(birthday.day)}`;
+  }
+  return `公历 ${birthday.month} 月 ${birthday.day} 日`;
+}
+
+function formatDaysUntil(days) {
+  if (days === 0) return "今天生日";
+  return `还有 ${days} 天`;
+}
+
 function sameDate(value, isoDate) {
   if (!value) return false;
   return toISODate(new Date(value)) === isoDate;
+}
+
+function nextBirthdayOccurrence(birthday, fromIso) {
+  return birthday.calendar === "lunar"
+    ? nextLunarBirthdayOccurrence(birthday, fromIso)
+    : nextSolarBirthdayOccurrence(birthday, fromIso);
+}
+
+function nextSolarBirthdayOccurrence(birthday, fromIso) {
+  const from = parseISODate(fromIso);
+  const startYear = from.getFullYear();
+  for (let year = startYear; year <= startYear + 5; year += 1) {
+    const date = new Date(year, birthday.month - 1, birthday.day);
+    if (date.getMonth() !== birthday.month - 1 || date.getDate() !== birthday.day) continue;
+    const iso = toISODate(date);
+    if (iso >= fromIso) return { iso, daysUntil: daysBetween(fromIso, iso) };
+  }
+  return null;
+}
+
+function nextLunarBirthdayOccurrence(birthday, fromIso) {
+  const from = parseISODate(fromIso);
+  for (let offset = 0; offset <= 800; offset += 1) {
+    const date = addDays(from, offset);
+    const lunar = lunarParts(date);
+    if (!lunar) return null;
+    if (
+      lunar.month === birthday.month &&
+      lunar.day === birthday.day &&
+      lunar.isLeapMonth === Boolean(birthday.isLeapMonth)
+    ) {
+      return { iso: toISODate(date), daysUntil: offset };
+    }
+  }
+  return null;
+}
+
+function lunarParts(date) {
+  try {
+    const parts = new Intl.DateTimeFormat("zh-CN-u-ca-chinese", {
+      month: "long",
+      day: "numeric",
+    }).formatToParts(date);
+    const monthText = parts.find((part) => part.type === "month")?.value || "";
+    const dayText = parts.find((part) => part.type === "day")?.value || "";
+    const month = lunarMonthNumber(monthText.replace("闰", ""));
+    const day = Number(dayText);
+    if (!month || !day) return null;
+    return {
+      month,
+      day,
+      isLeapMonth: monthText.includes("闰"),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function lunarMonthNumber(monthText) {
+  return lunarMonthLabels.findIndex((label) => label === monthText) + 1;
+}
+
+function lunarDayLabel(day) {
+  const labels = [
+    "初一",
+    "初二",
+    "初三",
+    "初四",
+    "初五",
+    "初六",
+    "初七",
+    "初八",
+    "初九",
+    "初十",
+    "十一",
+    "十二",
+    "十三",
+    "十四",
+    "十五",
+    "十六",
+    "十七",
+    "十八",
+    "十九",
+    "二十",
+    "廿一",
+    "廿二",
+    "廿三",
+    "廿四",
+    "廿五",
+    "廿六",
+    "廿七",
+    "廿八",
+    "廿九",
+    "三十",
+  ];
+  return labels[day - 1] || `${day} 日`;
+}
+
+function daysBetween(fromIso, toIso) {
+  const from = parseISODate(fromIso);
+  const to = parseISODate(toIso);
+  return Math.round((to.getTime() - from.getTime()) / 86400000);
+}
+
+function solarMonthDays(year, month) {
+  return new Date(year, month, 0).getDate();
+}
+
+function maxISODate(first, second) {
+  return first > second ? first : second;
+}
+
+function clampInteger(value, min, max, fallback) {
+  const number = Number(value);
+  if (!Number.isInteger(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
+}
+
+function normalizeBirthYear(value) {
+  const year = Number(value);
+  if (!Number.isInteger(year) || year < 1 || year > 9999) return null;
+  return year;
+}
+
+function normalizeNonNegativeInteger(value) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 0) return 0;
+  return number;
 }
 
 function createId() {

@@ -1,5 +1,13 @@
-const cacheName = "workbuddy-v28";
-const assets = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
+const cacheName = "workbuddy-v36";
+const assets = [
+  "./",
+  "./index.html",
+  "./styles.css",
+  "./app.js",
+  "./english-wordbanks.js",
+  "./manifest.webmanifest",
+  "./icon.svg",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(cacheName).then((cache) => cache.addAll(assets)));

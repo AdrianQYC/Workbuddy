@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#f8fafc" />
     <title>Workbuddy</title>
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="stylesheet" href="./styles.css?v=28" />
+    <link rel="stylesheet" href="./styles.css?v=36" />
   </head>
   <body>
     <div class="app-shell">
@@ -18,58 +18,22 @@
       </header>
 
       <main class="planner">
-        <section class="left-panel" aria-label="计划概览">
-          <div class="date-strip" id="dateStrip"></div>
+        <section class="left-panel" aria-label="工作台侧边栏">
+          <nav class="module-nav" aria-label="工作台模块">
+            <button class="module-button is-active" type="button" data-module="planner">
+              <span>每日计划</span>
+              <small>任务、日程、生日</small>
+            </button>
+            <button class="module-button" type="button" data-module="english">
+              <span>每日英语</span>
+              <small>单词、词库、积累</small>
+            </button>
+          </nav>
 
-          <div class="stats-grid">
-            <div class="stat">
-              <span class="stat-label">今天</span>
-              <strong id="todayCount">0</strong>
-            </div>
-            <div class="stat">
-              <span class="stat-label">日程</span>
-              <strong id="scheduleCount">0</strong>
-            </div>
-            <div class="stat">
-              <span class="stat-label">中期</span>
-              <strong id="mediumCount">0</strong>
-            </div>
-            <div class="stat">
-              <span class="stat-label">总完成</span>
-              <strong id="doneCount">0</strong>
-            </div>
-          </div>
-
-          <form class="task-form" id="taskForm">
-            <input id="taskTitle" type="text" maxlength="80" placeholder="添加一个任务" autocomplete="off" required />
-            <div class="form-row">
-              <label class="select-field">
-                <span>类型</span>
-                <select id="taskScope" aria-label="任务类型">
-                  <option value="schedule">日程</option>
-                  <option value="medium">中期</option>
-                </select>
-              </label>
-              <label class="date-field">
-                <span id="taskDateLabel">日期</span>
-                <input id="taskDate" type="date" />
-              </label>
-              <label class="select-field priority-select">
-                <span>重要性</span>
-                <select id="taskPriority" aria-label="重要性">
-                  <option value="normal">普通</option>
-                  <option value="high">重要</option>
-                  <option value="urgent">紧急</option>
-                </select>
-              </label>
-              <button class="primary-button" type="submit">添加</button>
-            </div>
-          </form>
-
-          <section class="backup-panel" aria-label="数据备份">
+          <section class="backup-panel" aria-label="全局数据备份">
             <div class="backup-heading">
-              <strong>数据备份</strong>
-              <span id="backupStatus">适合配合坚果云手动同步</span>
+              <strong>全局数据备份</strong>
+              <span id="backupStatus">包含每日计划、生日、每日英语</span>
             </div>
             <div class="backup-actions">
               <button class="backup-button primary" id="exportBtn" type="button">导出备份</button>
@@ -82,13 +46,99 @@
           </section>
         </section>
 
-        <section class="main-panel" aria-label="任务列表">
+        <section class="main-panel" aria-label="工作台内容">
+          <div class="module-overview" id="plannerOverview">
+            <div class="date-strip" id="dateStrip"></div>
+
+            <div class="stats-grid">
+              <div class="stat">
+                <span class="stat-label">今天</span>
+                <strong id="todayCount">0</strong>
+              </div>
+              <div class="stat">
+                <span class="stat-label">日程</span>
+                <strong id="scheduleCount">0</strong>
+              </div>
+              <div class="stat">
+                <span class="stat-label">中期</span>
+                <strong id="mediumCount">0</strong>
+              </div>
+              <div class="stat">
+                <span class="stat-label">生日</span>
+                <strong id="birthdayCount">0</strong>
+              </div>
+              <div class="stat">
+                <span class="stat-label">总完成</span>
+                <strong id="doneCount">0</strong>
+              </div>
+            </div>
+
+            <form class="task-form" id="taskForm">
+              <input id="taskTitle" type="text" maxlength="80" placeholder="添加一个任务" autocomplete="off" required />
+              <div class="form-row">
+                <label class="select-field">
+                  <span>类型</span>
+                  <select id="taskScope" aria-label="任务类型">
+                    <option value="schedule">日程</option>
+                    <option value="medium">中期</option>
+                  </select>
+                </label>
+                <label class="date-field">
+                  <span id="taskDateLabel">日期</span>
+                  <input id="taskDate" type="date" />
+                </label>
+                <label class="select-field priority-select">
+                  <span>重要性</span>
+                  <select id="taskPriority" aria-label="重要性">
+                    <option value="normal">普通</option>
+                    <option value="high">重要</option>
+                    <option value="urgent">紧急</option>
+                  </select>
+                </label>
+                <button class="primary-button" type="submit">添加</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="module-overview english-overview" id="englishOverview" hidden>
+            <div class="stats-grid">
+              <div class="stat">
+                <span class="stat-label">今日单词</span>
+                <strong id="englishTodayCount">0</strong>
+              </div>
+              <div class="stat">
+                <span class="stat-label">已学</span>
+                <strong id="englishLearnedCount">0</strong>
+              </div>
+              <div class="stat">
+                <span class="stat-label">词库</span>
+                <strong id="englishBankCount">0</strong>
+              </div>
+              <div class="stat">
+                <span class="stat-label">词组</span>
+                <strong id="englishGroupCount">0</strong>
+              </div>
+            </div>
+            <div class="sidebar-note">
+              <strong>每日英语</strong>
+              <span>这里先保留模块位置，词库确认后再接入每日抽词和学习统计。</span>
+            </div>
+          </div>
+
           <div class="toolbar">
-            <div class="segments" role="tablist" aria-label="视图">
+            <div class="segments" id="plannerSegments" role="tablist" aria-label="计划视图">
               <button class="segment is-active" type="button" data-view="today">今天</button>
               <button class="segment" type="button" data-view="schedule">日程</button>
               <button class="segment" type="button" data-view="medium">中期</button>
+              <button class="segment" type="button" data-view="birthday">生日</button>
               <button class="segment" type="button" data-view="search">搜索</button>
+            </div>
+            <div class="segments" id="englishSegments" role="tablist" aria-label="英语视图" hidden>
+              <button class="segment is-active" type="button" data-english-view="today">今日</button>
+              <button class="segment" type="button" data-english-view="review">复习</button>
+              <button class="segment" type="button" data-english-view="library">词库</button>
+              <button class="segment" type="button" data-english-view="groups">词组</button>
+              <button class="segment" type="button" data-english-view="search">搜索</button>
             </div>
           </div>
 
@@ -126,6 +176,35 @@
             <button class="clear-search" id="clearSearch" type="button">清空</button>
           </form>
 
+          <form class="birthday-panel" id="birthdayPanel" hidden>
+            <input id="birthdayName" type="text" maxlength="40" placeholder="姓名" autocomplete="off" />
+            <label class="select-field">
+              <span>历法</span>
+              <select id="birthdayCalendar" aria-label="生日历法">
+                <option value="solar">公历</option>
+                <option value="lunar">农历</option>
+              </select>
+            </label>
+            <label class="date-field birthday-year-field">
+              <span>年份</span>
+              <input id="birthdayYear" type="number" min="1" max="9999" placeholder="可不填" />
+            </label>
+            <label class="select-field">
+              <span>月份</span>
+              <select id="birthdayMonth" aria-label="生日月份"></select>
+            </label>
+            <label class="select-field">
+              <span>日期</span>
+              <select id="birthdayDay" aria-label="生日日期"></select>
+            </label>
+            <label class="leap-field" id="birthdayLeapField">
+              <input id="birthdayLeap" type="checkbox" />
+              <span>闰月</span>
+            </label>
+            <input id="birthdayNote" type="text" maxlength="80" placeholder="备注，可不填" autocomplete="off" />
+            <button class="primary-button" type="submit">添加</button>
+          </form>
+
           <div class="list-heading">
             <h2 id="viewTitle">今天</h2>
             <span id="viewMeta">0 项</span>
@@ -161,6 +240,6 @@
       </article>
     </template>
 
-    <script src="./app.js?v=28" type="module"></script>
+    <script src="./app.js?v=36" type="module"></script>
   </body>
 </html>
