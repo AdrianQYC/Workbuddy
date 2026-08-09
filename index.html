@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f8fafc" />
     <title>Workbuddy</title>
-    <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="stylesheet" href="./styles.css?v=36" />
+    <link rel="manifest" href="./manifest.webmanifest?v=50" />
+    <link rel="stylesheet" href="./styles.css?v=50" />
   </head>
   <body>
     <div class="app-shell">
@@ -22,18 +22,19 @@
           <nav class="module-nav" aria-label="工作台模块">
             <button class="module-button is-active" type="button" data-module="planner">
               <span>每日计划</span>
-              <small>任务、日程、生日</small>
             </button>
             <button class="module-button" type="button" data-module="english">
               <span>每日英语</span>
-              <small>单词、词库、积累</small>
+            </button>
+            <button class="module-button" type="button" data-module="knowledge">
+              <span>知识文库</span>
             </button>
           </nav>
 
-          <section class="backup-panel" aria-label="全局数据备份">
+          <section class="backup-panel" aria-label="数据备份">
             <div class="backup-heading">
-              <strong>全局数据备份</strong>
-              <span id="backupStatus">包含每日计划、生日、每日英语</span>
+              <strong>数据备份</strong>
+              <span id="backupStatus"></span>
             </div>
             <div class="backup-actions">
               <button class="backup-button primary" id="exportBtn" type="button">导出备份</button>
@@ -41,7 +42,7 @@
                 导入备份
                 <input id="importInput" type="file" accept="application/json,.json" />
               </label>
-              <button class="backup-button" id="restoreImportBackup" type="button" disabled>恢复导入前数据</button>
+              <button class="backup-button" id="restoreImportBackup" type="button" disabled>恢复数据</button>
             </div>
           </section>
         </section>
@@ -119,10 +120,6 @@
                 <strong id="englishGroupCount">0</strong>
               </div>
             </div>
-            <div class="sidebar-note">
-              <strong>每日英语</strong>
-              <span>这里先保留模块位置，词库确认后再接入每日抽词和学习统计。</span>
-            </div>
           </div>
 
           <div class="toolbar">
@@ -139,6 +136,12 @@
               <button class="segment" type="button" data-english-view="library">词库</button>
               <button class="segment" type="button" data-english-view="groups">词组</button>
               <button class="segment" type="button" data-english-view="search">搜索</button>
+            </div>
+            <div class="segments" id="knowledgeSegments" role="tablist" aria-label="知识文库视图" hidden>
+              <button class="segment is-active" type="button" data-knowledge-view="categories">分类</button>
+              <button class="segment" type="button" data-knowledge-view="new">新建</button>
+              <button class="segment" type="button" data-knowledge-view="import">导入</button>
+              <button class="segment" type="button" data-knowledge-view="trash">回收站</button>
             </div>
           </div>
 
@@ -206,11 +209,12 @@
           </form>
 
           <div class="list-heading">
-            <h2 id="viewTitle">今天</h2>
+            <h2 id="viewTitle" hidden>今天</h2>
             <span id="viewMeta">0 项</span>
           </div>
 
           <div class="task-list" id="taskList"></div>
+          <input id="knowledgeImportInput" type="file" accept=".md,.txt,text/markdown,text/plain" hidden />
           <div class="empty-state" id="emptyState" hidden>
             <div class="empty-visual" aria-hidden="true">
               <span></span>
@@ -240,6 +244,6 @@
       </article>
     </template>
 
-    <script src="./app.js?v=36" type="module"></script>
+    <script src="./app.js?v=50" type="module"></script>
   </body>
 </html>

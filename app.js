@@ -3,6 +3,7 @@ import { englishWordBanks } from "./english-wordbanks.js";
 const storageKey = "workbuddy.tasks.v1";
 const birthdayStorageKey = "workbuddy.birthdays.v1";
 const englishStorageKey = "workbuddy.english.v1";
+const knowledgeStorageKey = "workbuddy.knowledge.v1";
 const legacyStorageKeys = ["daily-planner.tasks.v1"];
 const importBackupKey = "workbuddy.import-backup.v1";
 const legacyImportBackupKeys = ["daily-planner.import-backup.v1"];
@@ -11,10 +12,19 @@ const state = {
   tasks: loadTasks(),
   birthdays: loadBirthdays(),
   english: loadEnglish(),
+  knowledge: loadKnowledge(),
   module: "planner",
   selectedDate: toISODate(new Date()),
   view: "today",
   englishView: "today",
+  knowledgeView: "categories",
+  knowledgeSearch: "",
+  knowledgeCategorySort: "custom",
+  knowledgeDocumentSort: "custom",
+  knowledgeCreatingCategory: false,
+  knowledgeClassifyingDocumentId: null,
+  knowledgeEditorMode: "edit",
+  knowledgeEditor: null,
   statusFilters: {
     today: "all",
     schedule: "all",
@@ -38,6 +48,19 @@ const state = {
   birthdayEditing: null,
   expandedGoals: new Set(),
   collapsedSearchGoals: new Set(),
+  expandedKnowledgeCategories: new Set(),
+  knowledgeDragging: null,
+  knowledgeDragTarget: null,
+  knowledgeDropAfter: false,
+  knowledgeBatch: {
+    active: false,
+    trashActive: false,
+    selectedCategories: new Set(),
+    selectedDocuments: new Set(),
+    selectedTrash: new Set(),
+    moveTargetId: "uncategorized",
+    moveMode: "add",
+  },
   scheduleExpandedGroups: new Set(),
   dragging: null,
 };
@@ -78,6 +101,9 @@ const elements = {
   plannerSegments: document.querySelector("#plannerSegments"),
   englishSegments: document.querySelector("#englishSegments"),
   englishSegmentButtons: document.querySelectorAll("[data-english-view]"),
+  knowledgeSegments: document.querySelector("#knowledgeSegments"),
+  knowledgeSegmentButtons: document.querySelectorAll("[data-knowledge-view]"),
+  knowledgeImportInput: document.querySelector("#knowledgeImportInput"),
   birthdayPanel: document.querySelector("#birthdayPanel"),
   birthdayName: document.querySelector("#birthdayName"),
   birthdayCalendar: document.querySelector("#birthdayCalendar"),
@@ -171,6 +197,7 @@ function bindEvents() {
       state.module = button.dataset.module;
       if (state.module === "planner") state.view = "today";
       if (state.module === "english") state.englishView = "today";
+      if (state.module === "knowledge") state.knowledgeView = "categories";
       render();
     });
   });
@@ -185,6 +212,18 @@ function bindEvents() {
   elements.englishSegmentButtons.forEach((button) => {
     button.addEventListener("click", () => {
       state.englishView = button.dataset.englishView;
+      render();
+    });
+  });
+
+  elements.knowledgeSegmentButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      state.knowledgeView = button.dataset.knowledgeView;
+      state.knowledgeClassifyingDocumentId = null;
+      resetKnowledgeBatch();
+      if (state.knowledgeView === "new") {
+        state.knowledgeEditor = createKnowledgeEditorDraft();
+      }
       render();
     });
   });
@@ -255,6 +294,7 @@ function bindEvents() {
   elements.exportBtn.addEventListener("click", exportTasks);
   elements.importInput.addEventListener("change", importTasks);
   elements.restoreImportBackup.addEventListener("click", restoreImportBackup);
+  elements.knowledgeImportInput.addEventListener("change", importKnowledgeDocument);
 }
 
 function render() {
@@ -262,6 +302,7 @@ function render() {
   renderDateStrip();
   renderSegments();
   renderEnglishSegments();
+  renderKnowledgeSegments();
   renderStatusFilters();
   renderSearchPanel();
   renderBirthdayPanel();
@@ -274,13 +315,16 @@ function render() {
 
 function renderModules() {
   const isPlanner = state.module === "planner";
+  const isEnglish = state.module === "english";
+  const isKnowledge = state.module === "knowledge";
   elements.moduleButtons.forEach((button) => {
     button.classList.toggle("is-active", button.dataset.module === state.module);
   });
   elements.plannerOverview.hidden = !isPlanner;
-  elements.englishOverview.hidden = isPlanner;
+  elements.englishOverview.hidden = !isEnglish;
   elements.plannerSegments.hidden = !isPlanner;
-  elements.englishSegments.hidden = isPlanner;
+  elements.englishSegments.hidden = !isEnglish;
+  elements.knowledgeSegments.hidden = !isKnowledge;
 }
 
 function renderDateStrip() {
@@ -310,6 +354,12 @@ function renderSegments() {
 function renderEnglishSegments() {
   elements.englishSegmentButtons.forEach((segment) => {
     segment.classList.toggle("is-active", segment.dataset.englishView === state.englishView);
+  });
+}
+
+function renderKnowledgeSegments() {
+  elements.knowledgeSegmentButtons.forEach((segment) => {
+    segment.classList.toggle("is-active", segment.dataset.knowledgeView === state.knowledgeView);
   });
 }
 
@@ -408,13 +458,19 @@ function renderList() {
   const entries = filteredEntries();
   elements.taskList.innerHTML = "";
   elements.taskList.classList.toggle("is-medium-list", state.module === "planner" && (state.view === "medium" || state.view === "search"));
-  elements.taskList.classList.toggle("is-reorderable", canReorderCurrentView());
+  elements.taskList.classList.toggle("is-reorderable", canReorderCurrentView() || canReorderKnowledgeView());
   elements.viewTitle.textContent = currentViewTitle();
   elements.viewMeta.textContent = currentViewMeta(entries);
-  elements.emptyState.hidden = state.module === "english" || state.view === "schedule" || entries.length > 0;
+  elements.emptyState.hidden =
+    state.module === "english" || state.module === "knowledge" || state.view === "schedule" || entries.length > 0;
 
   if (state.module === "english") {
     renderEnglishShell();
+    return;
+  }
+
+  if (state.module === "knowledge") {
+    renderKnowledgeShell();
     return;
   }
 
@@ -456,7 +512,7 @@ function renderEnglishShell() {
 function createEnglishTodayPanel() {
   const bank = currentEnglishBank();
   const word = todayEnglishWord(bank);
-  const panel = createEnglishPanel("今日", "每日认识一个新单词");
+  const panel = createEnglishPanel("今日");
   panel.append(createEnglishBankSelector());
 
   if (!word) {
@@ -470,7 +526,7 @@ function createEnglishTodayPanel() {
 
 function createEnglishLibraryPanel() {
   const bank = currentEnglishBank();
-  const panel = createEnglishPanel("词库", "每个词库单独统计学习情况");
+  const panel = createEnglishPanel("词库");
   panel.append(createEnglishBankSelector());
 
   const controls = document.createElement("div");
@@ -516,7 +572,7 @@ function createEnglishLibraryPanel() {
 }
 
 function createEnglishGroupsPanel() {
-  const panel = createEnglishPanel("词组", "近义、反义、形近、义近和自定义分组");
+  const panel = createEnglishPanel("词组");
   const form = document.createElement("form");
   form.className = "english-group-form";
   form.innerHTML = `
@@ -569,7 +625,7 @@ function createEnglishGroupsPanel() {
 }
 
 function createEnglishSearchPanel() {
-  const panel = createEnglishPanel("搜索", "按单词、释义、备注和词库查找");
+  const panel = createEnglishPanel("搜索");
   const controls = document.createElement("div");
   controls.className = "english-controls";
   controls.append(createEnglishBankSelector());
@@ -609,7 +665,7 @@ function createEnglishSearchPanel() {
 
 function createEnglishReviewPanel() {
   const bank = currentEnglishBank();
-  const panel = createEnglishPanel("复习", "从当前词库已学单词里抽一个复习");
+  const panel = createEnglishPanel("复习");
   panel.append(createEnglishBankSelector());
 
   const learnedWords = bank.words.filter((word) => englishProgressFor(bank.id, word.id).learnedAt);
@@ -657,13 +713,9 @@ function createEnglishReviewPanel() {
   return panel;
 }
 
-function createEnglishPanel(title, meta) {
+function createEnglishPanel(title, meta = "") {
   const panel = document.createElement("section");
   panel.className = "english-panel";
-  const heading = document.createElement("div");
-  heading.className = "english-panel-heading";
-  heading.innerHTML = `<h3>${title}</h3><span>${meta}</span>`;
-  panel.append(heading);
   return panel;
 }
 
@@ -768,6 +820,1358 @@ function createEnglishEmptyCard(text) {
   card.className = "english-empty-card";
   card.textContent = text;
   return card;
+}
+
+function renderKnowledgeShell() {
+  const shell = document.createElement("div");
+  shell.className = "knowledge-shell";
+
+  if (state.knowledgeView === "categories") shell.append(createKnowledgeCategoriesPanel());
+  if (state.knowledgeView === "new") shell.append(createKnowledgeEditorPanel());
+  if (state.knowledgeView === "import") shell.append(createKnowledgeImportPanel());
+  if (state.knowledgeView === "trash") shell.append(createKnowledgeTrashPanel());
+
+  elements.taskList.append(shell);
+}
+
+function createKnowledgePanel(title) {
+  const panel = document.createElement("section");
+  panel.className = "knowledge-panel";
+  return panel;
+}
+
+function createKnowledgeCategoriesPanel() {
+  const panel = createKnowledgePanel("分类");
+  const batchActive = state.knowledgeBatch.active;
+  const controls = document.createElement("div");
+  controls.className = "knowledge-controls";
+  controls.innerHTML = `
+    ${batchActive ? "" : '<button class="primary-button" type="button" data-action="new-category">新建分类</button>'}
+    <input type="search" placeholder="搜索文档" value="${escapeHtml(state.knowledgeSearch)}" />
+    <label class="select-field">
+      <span>分类排序</span>
+      <select data-sort="category" aria-label="分类排序">
+        <option value="custom"${state.knowledgeCategorySort === "custom" ? " selected" : ""}>手动</option>
+        <option value="az"${state.knowledgeCategorySort === "az" ? " selected" : ""}>首字母</option>
+      </select>
+    </label>
+    <label class="select-field">
+      <span>文档排序</span>
+      <select data-sort="document" aria-label="文档排序">
+        <option value="custom"${state.knowledgeDocumentSort === "custom" ? " selected" : ""}>手动</option>
+        <option value="az"${state.knowledgeDocumentSort === "az" ? " selected" : ""}>首字母</option>
+        <option value="updatedAt"${state.knowledgeDocumentSort === "updatedAt" ? " selected" : ""}>修改日期</option>
+      </select>
+    </label>
+    <button class="${batchActive ? "cancel-button" : "save-button"} knowledge-batch-toggle" type="button" data-action="batch-toggle">
+      ${batchActive ? "退出批量" : "批量处理"}
+    </button>
+  `;
+  controls.querySelector('[data-action="new-category"]')?.addEventListener("click", () => {
+    state.knowledgeCreatingCategory = true;
+    render();
+  });
+  controls.querySelector('input[type="search"]').addEventListener("input", (event) => {
+    state.knowledgeSearch = event.target.value.trim();
+    renderList();
+  });
+  controls.querySelector('[data-sort="category"]').addEventListener("change", (event) => {
+    state.knowledgeCategorySort = event.target.value;
+    renderList();
+  });
+  controls.querySelector('[data-sort="document"]').addEventListener("change", (event) => {
+    state.knowledgeDocumentSort = event.target.value;
+    renderList();
+  });
+  controls.querySelector('[data-action="batch-toggle"]').addEventListener("click", () => {
+    toggleKnowledgeBatchMode("categories");
+  });
+  panel.append(controls);
+
+  if (batchActive) {
+    panel.append(createKnowledgeBatchToolbar());
+  }
+
+  if (state.knowledgeCreatingCategory) {
+    panel.append(createNewKnowledgeCategoryForm());
+  }
+
+  if (state.knowledgeSearch) {
+    panel.append(createKnowledgeSearchResults());
+  }
+
+  const list = document.createElement("div");
+  list.className = "knowledge-category-list";
+  sortedKnowledgeCategories().forEach((category) => list.append(createKnowledgeCategoryCard(category)));
+  panel.append(list);
+  return panel;
+}
+
+function createNewKnowledgeCategoryForm() {
+  const form = document.createElement("form");
+  form.className = "knowledge-inline-form";
+  form.innerHTML = `
+    <input name="name" type="text" maxlength="40" placeholder="分类名称" autocomplete="off" />
+    <button class="save-button" type="submit">确认新建</button>
+    <button class="cancel-button" type="button">取消新建</button>
+  `;
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    createKnowledgeCategory(form.elements.name.value.trim() || "新建文件夹");
+  });
+  form.querySelector(".cancel-button").addEventListener("click", () => {
+    state.knowledgeCreatingCategory = false;
+    render();
+  });
+  return form;
+}
+
+function createKnowledgeSearchResults() {
+  const results = activeKnowledgeDocuments().filter((doc) => {
+    const keyword = state.knowledgeSearch.toLowerCase();
+    const categoryNames = doc.categoryIds.map((id) => knowledgeCategoryName(id)).join(" ");
+    return `${doc.title} ${doc.content} ${categoryNames}`.toLowerCase().includes(keyword);
+  });
+  const section = document.createElement("div");
+  section.className = "knowledge-search-results";
+  const heading = document.createElement("div");
+  heading.className = "knowledge-subheading";
+  heading.textContent = `搜索结果 ${results.length}`;
+  section.append(heading);
+  if (!results.length) {
+    section.append(createKnowledgeEmptyCard("没有找到匹配文档。"));
+    return section;
+  }
+  const list = document.createElement("div");
+  list.className = "knowledge-document-list";
+  results.sort(sortKnowledgeDocuments).forEach((doc) => list.append(createKnowledgeDocumentRow(doc, null, { fromSearch: true })));
+  section.append(list);
+  return section;
+}
+
+function createKnowledgeCategoryCard(category) {
+  const isDefault = category.id === "uncategorized";
+  const docs = documentsForCategory(category.id);
+  const expanded = state.expandedKnowledgeCategories.has(category.id);
+  const card = document.createElement("article");
+  card.className = `knowledge-category-card${state.knowledgeBatch.active ? " is-batch" : ""}${
+    state.knowledgeBatch.selectedCategories.has(category.id) ? " is-selected" : ""
+  }`;
+  card.innerHTML = `
+    <div class="knowledge-category-head">
+      ${state.knowledgeBatch.active ? knowledgeSelectionHtml("category", category.id, "选择分类") : ""}
+      <button class="expand-button${expanded ? " is-expanded" : ""}" type="button" title="展开" aria-label="展开">›</button>
+      <div>
+        <h3>${escapeHtml(category.name)}</h3>
+        <span>${docs.length} 篇文档</span>
+      </div>
+      <div class="knowledge-actions">
+        ${
+          !state.knowledgeBatch.active && state.knowledgeCategorySort === "custom"
+            ? '<button class="icon-button small drag-handle" type="button" data-drag-handle title="拖动排序" aria-label="拖动排序">☰</button>'
+            : ""
+        }
+        ${state.knowledgeBatch.active ? "" : '<button class="icon-button small" type="button" data-action="new-doc" title="新建文档" aria-label="新建文档">＋</button>'}
+        ${state.knowledgeBatch.active ? "" : '<button class="icon-button small" type="button" data-action="rename" title="重命名" aria-label="重命名">✎</button>'}
+        ${state.knowledgeBatch.active ? "" : '<button class="icon-button small" type="button" data-action="export" title="导出" aria-label="导出">⇩</button>'}
+        ${isDefault || state.knowledgeBatch.active ? "" : '<button class="icon-button small" type="button" data-action="delete" title="删除" aria-label="删除">×</button>'}
+      </div>
+    </div>
+  `;
+
+  card.querySelector(".expand-button").addEventListener("click", () => toggleKnowledgeCategory(category.id));
+  card.querySelector('[data-action="new-doc"]')?.addEventListener("click", () => openKnowledgeEditor({ categoryIds: [category.id] }));
+  card.querySelector('[data-action="export"]')?.addEventListener("click", () => exportKnowledgeCategory(category.id));
+  card.querySelector('[data-action="rename"]')?.addEventListener("click", () => renameKnowledgeCategory(category.id));
+  card.querySelector('[data-action="delete"]')?.addEventListener("click", () => deleteKnowledgeCategory(category.id));
+  bindKnowledgeSelection(card, "category", category.id);
+  setupKnowledgeDraggableElement(card, { kind: "category", id: category.id });
+
+  if (expanded) {
+    const list = document.createElement("div");
+    list.className = "knowledge-document-list";
+    if (!docs.length) {
+      list.append(createKnowledgeEmptyCard("这个分类里还没有文档。"));
+    } else {
+      docs.forEach((doc) => list.append(createKnowledgeDocumentRow(doc, category.id)));
+    }
+    card.append(list);
+  }
+  return card;
+}
+
+function createKnowledgeDocumentRow(doc, categoryId = null, options = {}) {
+  const row = document.createElement("article");
+  row.className = `knowledge-document-row${state.knowledgeBatch.active ? " is-batch" : ""}${
+    state.knowledgeBatch.selectedDocuments.has(doc.id) ? " is-selected" : ""
+  }`;
+  row.innerHTML = `
+    ${state.knowledgeBatch.active ? knowledgeSelectionHtml("document", doc.id, "选择文档") : ""}
+    <button class="knowledge-document-title" type="button">
+      <strong>${escapeHtml(doc.title || "未命名文档")}</strong>
+      <span>${escapeHtml(options.fromSearch ? `${doc.categoryIds.map((id) => knowledgeCategoryName(id)).join("、")} · ` : "")}${formatKnowledgeTime(
+        doc.updatedAt || doc.createdAt,
+      )}</span>
+    </button>
+    <div class="knowledge-actions">
+      ${
+        !state.knowledgeBatch.active && categoryId && state.knowledgeDocumentSort === "custom"
+          ? '<button class="icon-button small drag-handle" type="button" data-drag-handle title="拖动排序" aria-label="拖动排序">☰</button>'
+          : ""
+      }
+      ${state.knowledgeBatch.active ? "" : '<button class="icon-button small" type="button" data-action="rename" title="重命名" aria-label="重命名">✎</button>'}
+      ${state.knowledgeBatch.active ? "" : '<button class="icon-button small" type="button" data-action="classify" title="归类" aria-label="归类">▣</button>'}
+      ${state.knowledgeBatch.active ? "" : '<button class="icon-button small" type="button" data-action="export" title="导出" aria-label="导出">⇩</button>'}
+      ${state.knowledgeBatch.active ? "" : '<button class="icon-button small" type="button" data-action="delete" title="删除" aria-label="删除">×</button>'}
+    </div>
+  `;
+  row.querySelector(".knowledge-document-title").addEventListener("click", () => openKnowledgeEditor({ documentId: doc.id }));
+  row.querySelector('[data-action="rename"]')?.addEventListener("click", () => renameKnowledgeDocument(doc.id));
+  row.querySelector('[data-action="classify"]')?.addEventListener("click", () => {
+    state.knowledgeClassifyingDocumentId = state.knowledgeClassifyingDocumentId === doc.id ? null : doc.id;
+    renderList();
+  });
+  row.querySelector('[data-action="export"]')?.addEventListener("click", () => exportKnowledgeDocument(doc.id));
+  row.querySelector('[data-action="delete"]')?.addEventListener("click", () => deleteKnowledgeDocument(doc.id));
+  bindKnowledgeSelection(row, "document", doc.id);
+  setupKnowledgeDraggableElement(row, { kind: "document", id: doc.id, categoryId });
+
+  if (state.knowledgeClassifyingDocumentId === doc.id) {
+    row.append(createKnowledgeClassifyForm(doc));
+  }
+  return row;
+}
+
+function createKnowledgeClassifyForm(doc) {
+  const form = document.createElement("form");
+  form.className = "knowledge-classify-form";
+  form.append(createKnowledgeCategoryMultiSelect(doc.categoryIds));
+  const actions = document.createElement("div");
+  actions.className = "knowledge-form-actions";
+  actions.innerHTML = `
+    <button class="save-button" type="submit">保存归类</button>
+    <button class="cancel-button" type="button">取消</button>
+  `;
+  form.append(actions);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const categoryIds = Array.from(form.querySelectorAll('input[name="category"]:checked')).map((input) => input.value);
+    updateKnowledgeDocumentCategories(doc.id, categoryIds);
+  });
+  form.querySelector(".cancel-button").addEventListener("click", () => {
+    state.knowledgeClassifyingDocumentId = null;
+    renderList();
+  });
+  return form;
+}
+
+function createKnowledgeEditorPanel() {
+  if (!state.knowledgeEditor) {
+    state.knowledgeEditor = createKnowledgeEditorDraft();
+  }
+  const editor = state.knowledgeEditor;
+  const mode = state.knowledgeEditorMode === "preview" ? "preview" : "edit";
+  const panel = createKnowledgePanel(editor.documentId ? "编辑文档" : "新建文档");
+  const form = document.createElement("form");
+  form.className = `knowledge-editor is-${mode}`;
+  form.innerHTML = `
+    <div class="knowledge-editor-status">
+      <strong>${editor.documentId ? "编辑文档" : "新建文档"}</strong>
+      <span>${editor.documentId ? "正在修改已有文档" : "保存后会生成一篇新文档"}</span>
+    </div>
+    <input name="title" type="text" maxlength="80" placeholder="文档标题" value="${escapeHtml(editor.title)}" autocomplete="off" />
+    <div class="knowledge-editor-tabs" role="tablist" aria-label="文档模式">
+      <button class="${mode === "edit" ? "is-active" : ""}" type="button" data-editor-mode="edit">编辑</button>
+      <button class="${mode === "preview" ? "is-active" : ""}" type="button" data-editor-mode="preview">预览</button>
+    </div>
+    <textarea name="content" placeholder="用 Markdown 记录内容"${mode === "preview" ? " hidden" : ""}>${escapeHtml(editor.content)}</textarea>
+    <div class="knowledge-markdown-preview"${mode === "edit" ? " hidden" : ""}>${renderMarkdownPreview(editor.content)}</div>
+    <div class="knowledge-form-actions">
+      <button class="save-button" type="submit">保存</button>
+      <button class="cancel-button" type="button">取消</button>
+    </div>
+  `;
+  form.querySelector(".knowledge-editor-tabs").before(createKnowledgeCategoryMultiSelect(editor.categoryIds));
+  form.querySelectorAll("[data-editor-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      syncKnowledgeEditorDraft(form);
+      state.knowledgeEditorMode = button.dataset.editorMode;
+      renderList();
+    });
+  });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveKnowledgeEditor(form);
+  });
+  form.querySelector(".cancel-button").addEventListener("click", () => {
+    state.knowledgeEditor = null;
+    state.knowledgeEditorMode = "edit";
+    state.knowledgeView = "categories";
+    render();
+  });
+  panel.append(form);
+  return panel;
+}
+
+function createKnowledgeCategoryMultiSelect(selectedIds = []) {
+  const selected = new Set(selectedIds);
+  const wrapper = document.createElement("div");
+  wrapper.className = "knowledge-multi-select";
+
+  const title = document.createElement("div");
+  title.className = "knowledge-multi-title";
+  title.textContent = "归类到文件夹";
+
+  const trigger = document.createElement("button");
+  trigger.className = "knowledge-multi-trigger";
+  trigger.type = "button";
+  trigger.setAttribute("aria-label", "选择文件夹");
+  trigger.setAttribute("aria-expanded", "false");
+  trigger.innerHTML = `
+    <span class="knowledge-multi-summary"></span>
+    <span class="knowledge-multi-arrow" aria-hidden="true">⌄</span>
+  `;
+
+  const dropdown = document.createElement("div");
+  dropdown.className = "knowledge-multi-dropdown";
+  dropdown.hidden = true;
+
+  const updateTrigger = () => {
+    const checked = Array.from(dropdown.querySelectorAll('input[name="category"]:checked'));
+    const names = checked.map((input) => knowledgeCategoryName(input.value));
+    const summary = trigger.querySelector(".knowledge-multi-summary");
+    if (!names.length) {
+      summary.textContent = "默认：未分类";
+      trigger.title = "未选择分类时会保存到未分类";
+      return;
+    }
+    const preview = names.slice(0, 2).join("、");
+    summary.textContent = names.length > 2 ? `${preview} 等 ${names.length} 个` : preview;
+    trigger.title = names.join("、");
+  };
+
+  sortedKnowledgeCategories().forEach((category) => {
+    const label = document.createElement("label");
+    label.innerHTML = `
+      <input type="checkbox" name="category" value="${escapeHtml(category.id)}"${selected.has(category.id) ? " checked" : ""} />
+      <span>${escapeHtml(category.name)}</span>
+    `;
+    label.querySelector("input").addEventListener("change", updateTrigger);
+    dropdown.append(label);
+  });
+
+  trigger.addEventListener("click", () => {
+    dropdown.hidden = !dropdown.hidden;
+    trigger.setAttribute("aria-expanded", String(!dropdown.hidden));
+  });
+
+  wrapper.append(title, trigger, dropdown);
+  updateTrigger();
+  return wrapper;
+}
+
+function createKnowledgeImportPanel() {
+  const panel = createKnowledgePanel("导入");
+  const box = document.createElement("div");
+  box.className = "knowledge-import-box";
+  box.innerHTML = `
+    <button class="primary-button" type="button">选择文件</button>
+  `;
+  box.querySelector("button").addEventListener("click", () => elements.knowledgeImportInput.click());
+  panel.append(box);
+  return panel;
+}
+
+function createKnowledgeTrashPanel() {
+  const panel = createKnowledgePanel("回收站");
+  const controls = document.createElement("div");
+  controls.className = "knowledge-controls";
+  controls.innerHTML = `
+    <button class="${state.knowledgeBatch.trashActive ? "cancel-button" : "save-button"} knowledge-batch-toggle" type="button" data-action="trash-batch-toggle">
+      ${state.knowledgeBatch.trashActive ? "退出批量" : "批量处理"}
+    </button>
+  `;
+  controls.querySelector('[data-action="trash-batch-toggle"]').addEventListener("click", () => toggleKnowledgeBatchMode("trash"));
+  panel.append(controls);
+
+  if (state.knowledgeBatch.trashActive) {
+    panel.append(createKnowledgeTrashBatchToolbar());
+  }
+
+  if (!state.knowledge.trash.length) {
+    panel.append(createKnowledgeEmptyCard("回收站是空的。"));
+    return panel;
+  }
+  const list = document.createElement("div");
+  list.className = "knowledge-trash-list";
+  state.knowledge.trash.forEach((item) => list.append(createKnowledgeTrashRow(item)));
+  panel.append(list);
+  return panel;
+}
+
+function createKnowledgeTrashRow(item) {
+  const row = document.createElement("article");
+  row.className = `knowledge-trash-row${state.knowledgeBatch.trashActive ? " is-batch" : ""}${
+    state.knowledgeBatch.selectedTrash.has(item.id) ? " is-selected" : ""
+  }`;
+  const title = item.type === "category" ? item.category?.name || "已删除分类" : item.document?.title || "已删除文档";
+  const meta =
+    item.type === "category"
+      ? `分类 · ${Array.isArray(item.documents) ? item.documents.length : 0} 篇文档`
+      : `文档 · ${formatKnowledgeTime(item.deletedAt)}`;
+  row.innerHTML = `
+    ${state.knowledgeBatch.trashActive ? knowledgeSelectionHtml("trash", item.id, "选择回收站条目") : ""}
+    <div>
+      <strong>${escapeHtml(title)}</strong>
+      <span>${escapeHtml(meta)}</span>
+    </div>
+    <div class="knowledge-actions">
+      ${state.knowledgeBatch.trashActive ? "" : '<button class="save-button" type="button" data-action="restore">恢复</button>'}
+      ${state.knowledgeBatch.trashActive ? "" : '<button class="cancel-button" type="button" data-action="delete">彻底删除</button>'}
+    </div>
+  `;
+  row.querySelector('[data-action="restore"]')?.addEventListener("click", () => restoreKnowledgeTrash(item.id));
+  row.querySelector('[data-action="delete"]')?.addEventListener("click", () => purgeKnowledgeTrash(item.id));
+  bindKnowledgeSelection(row, "trash", item.id);
+  return row;
+}
+
+function createKnowledgeBatchToolbar() {
+  pruneKnowledgeBatchSelection();
+  const bar = document.createElement("div");
+  bar.className = "knowledge-batch-bar";
+  const selectedCategories = selectedKnowledgeCategoryIds();
+  const selectedDocuments = selectedKnowledgeDocumentIds();
+  const total = selectedCategories.length + selectedDocuments.length;
+  const targetOptions = sortedKnowledgeCategories()
+    .map((category) => `<option value="${escapeHtml(category.id)}"${state.knowledgeBatch.moveTargetId === category.id ? " selected" : ""}>${escapeHtml(category.name)}</option>`)
+    .join("");
+  bar.innerHTML = `
+    <strong>已选 ${total} 项</strong>
+    <label class="select-field">
+      <span>目标分类</span>
+      <select data-batch-move-target aria-label="批量移动目标分类">
+        ${targetOptions}
+      </select>
+    </label>
+    <label class="select-field">
+      <span>移动方式</span>
+      <select data-batch-move-mode aria-label="批量移动方式">
+        <option value="add"${state.knowledgeBatch.moveMode === "add" ? " selected" : ""}>添加到</option>
+        <option value="replace"${state.knowledgeBatch.moveMode === "replace" ? " selected" : ""}>替换为</option>
+      </select>
+    </label>
+    <button class="save-button" type="button" data-action="batch-move"${selectedDocuments.length ? "" : " disabled"}>移动文档</button>
+    <button class="save-button" type="button" data-action="batch-export"${total ? "" : " disabled"}>批量导出</button>
+    <button class="cancel-button" type="button" data-action="batch-delete"${total ? "" : " disabled"}>批量删除</button>
+    <button class="cancel-button subtle" type="button" data-action="batch-cancel">取消</button>
+  `;
+  bar.querySelector("[data-batch-move-target]").addEventListener("change", (event) => {
+    state.knowledgeBatch.moveTargetId = event.target.value;
+  });
+  bar.querySelector("[data-batch-move-mode]").addEventListener("change", (event) => {
+    state.knowledgeBatch.moveMode = event.target.value === "replace" ? "replace" : "add";
+  });
+  bar.querySelector('[data-action="batch-move"]').addEventListener("click", moveSelectedKnowledgeDocuments);
+  bar.querySelector('[data-action="batch-export"]').addEventListener("click", exportSelectedKnowledgeItems);
+  bar.querySelector('[data-action="batch-delete"]').addEventListener("click", deleteSelectedKnowledgeItems);
+  bar.querySelector('[data-action="batch-cancel"]').addEventListener("click", () => {
+    resetKnowledgeBatch();
+    render();
+  });
+  return bar;
+}
+
+function createKnowledgeTrashBatchToolbar() {
+  pruneKnowledgeBatchSelection();
+  const bar = document.createElement("div");
+  bar.className = "knowledge-batch-bar";
+  const selectedTrash = selectedKnowledgeTrashIds();
+  bar.innerHTML = `
+    <strong>已选 ${selectedTrash.length} 项</strong>
+    <button class="save-button" type="button" data-action="trash-restore"${selectedTrash.length ? "" : " disabled"}>批量恢复</button>
+    <button class="cancel-button" type="button" data-action="trash-purge"${selectedTrash.length ? "" : " disabled"}>彻底删除</button>
+    <button class="cancel-button subtle" type="button" data-action="trash-cancel">取消</button>
+  `;
+  bar.querySelector('[data-action="trash-restore"]').addEventListener("click", restoreSelectedKnowledgeTrash);
+  bar.querySelector('[data-action="trash-purge"]').addEventListener("click", purgeSelectedKnowledgeTrash);
+  bar.querySelector('[data-action="trash-cancel"]').addEventListener("click", () => {
+    resetKnowledgeBatch();
+    render();
+  });
+  return bar;
+}
+
+function knowledgeSelectionHtml(kind, id, label) {
+  const checked =
+    (kind === "category" && state.knowledgeBatch.selectedCategories.has(id)) ||
+    (kind === "document" && state.knowledgeBatch.selectedDocuments.has(id)) ||
+    (kind === "trash" && state.knowledgeBatch.selectedTrash.has(id));
+  return `
+    <label class="knowledge-select" title="${escapeHtml(label)}">
+      <input type="checkbox" data-select-kind="${escapeHtml(kind)}" data-select-id="${escapeHtml(id)}"${checked ? " checked" : ""} />
+      <span>${escapeHtml(label)}</span>
+    </label>
+  `;
+}
+
+function bindKnowledgeSelection(container, kind, id) {
+  const checkbox = container.querySelector(`input[data-select-kind="${kind}"][data-select-id="${cssEscape(id)}"]`);
+  if (!checkbox) return;
+  checkbox.addEventListener("change", (event) => {
+    setKnowledgeBatchSelection(kind, id, event.target.checked);
+    renderList();
+  });
+}
+
+function toggleKnowledgeBatchMode(scope) {
+  if (scope === "trash") {
+    state.knowledgeBatch.trashActive = !state.knowledgeBatch.trashActive;
+    state.knowledgeBatch.active = false;
+    state.knowledgeBatch.selectedCategories.clear();
+    state.knowledgeBatch.selectedDocuments.clear();
+  } else {
+    state.knowledgeBatch.active = !state.knowledgeBatch.active;
+    state.knowledgeBatch.trashActive = false;
+    state.knowledgeBatch.selectedTrash.clear();
+    state.knowledgeClassifyingDocumentId = null;
+  }
+  if (!state.knowledgeBatch.active) {
+    state.knowledgeBatch.selectedCategories.clear();
+    state.knowledgeBatch.selectedDocuments.clear();
+  }
+  if (!state.knowledgeBatch.trashActive) {
+    state.knowledgeBatch.selectedTrash.clear();
+  }
+  render();
+}
+
+function resetKnowledgeBatch() {
+  state.knowledgeBatch.active = false;
+  state.knowledgeBatch.trashActive = false;
+  state.knowledgeBatch.selectedCategories.clear();
+  state.knowledgeBatch.selectedDocuments.clear();
+  state.knowledgeBatch.selectedTrash.clear();
+}
+
+function setKnowledgeBatchSelection(kind, id, selected) {
+  const target =
+    kind === "category"
+      ? state.knowledgeBatch.selectedCategories
+      : kind === "document"
+        ? state.knowledgeBatch.selectedDocuments
+        : state.knowledgeBatch.selectedTrash;
+  if (selected) {
+    target.add(id);
+  } else {
+    target.delete(id);
+  }
+}
+
+function pruneKnowledgeBatchSelection() {
+  const categoryIds = new Set(state.knowledge.categories.map((category) => category.id));
+  const documentIds = new Set(state.knowledge.documents.map((doc) => doc.id));
+  const trashIds = new Set(state.knowledge.trash.map((item) => item.id));
+  state.knowledgeBatch.selectedCategories.forEach((id) => {
+    if (!categoryIds.has(id)) state.knowledgeBatch.selectedCategories.delete(id);
+  });
+  state.knowledgeBatch.selectedDocuments.forEach((id) => {
+    if (!documentIds.has(id)) state.knowledgeBatch.selectedDocuments.delete(id);
+  });
+  state.knowledgeBatch.selectedTrash.forEach((id) => {
+    if (!trashIds.has(id)) state.knowledgeBatch.selectedTrash.delete(id);
+  });
+  if (!categoryIds.has(state.knowledgeBatch.moveTargetId)) {
+    state.knowledgeBatch.moveTargetId = "uncategorized";
+  }
+}
+
+function selectedKnowledgeCategoryIds() {
+  pruneKnowledgeBatchSelection();
+  return Array.from(state.knowledgeBatch.selectedCategories);
+}
+
+function selectedKnowledgeDocumentIds() {
+  pruneKnowledgeBatchSelection();
+  return Array.from(state.knowledgeBatch.selectedDocuments);
+}
+
+function selectedKnowledgeTrashIds() {
+  pruneKnowledgeBatchSelection();
+  return Array.from(state.knowledgeBatch.selectedTrash);
+}
+
+function createKnowledgeEmptyCard(text) {
+  const card = document.createElement("div");
+  card.className = "knowledge-empty-card";
+  card.textContent = text;
+  return card;
+}
+
+function createKnowledgeEditorDraft(overrides = {}) {
+  return {
+    documentId: null,
+    title: "",
+    content: "",
+    categoryIds: [],
+    ...overrides,
+  };
+}
+
+function openKnowledgeEditor(options = {}) {
+  const doc = options.documentId ? knowledgeDocumentById(options.documentId) : null;
+  state.knowledgeEditorMode = "edit";
+  state.knowledgeEditor = doc
+    ? createKnowledgeEditorDraft({
+        documentId: doc.id,
+        title: doc.title,
+        content: doc.content,
+        categoryIds: [...doc.categoryIds],
+      })
+    : createKnowledgeEditorDraft({
+        categoryIds: Array.isArray(options.categoryIds) ? [...options.categoryIds] : [],
+      });
+  state.knowledgeView = "new";
+  state.knowledgeClassifyingDocumentId = null;
+  render();
+}
+
+function saveKnowledgeEditor(form) {
+  const now = new Date().toISOString();
+  const title = form.elements.title.value.trim() || "未命名文档";
+  const content = form.elements.content.value;
+  const categoryIds = normalizeKnowledgeCategoryIds(
+    Array.from(form.querySelectorAll('input[name="category"]:checked')).map((input) => input.value),
+  );
+
+  if (state.knowledgeEditor.documentId) {
+    const docId = state.knowledgeEditor.documentId;
+    state.knowledge.documents = state.knowledge.documents.map((doc) =>
+      doc.id === docId
+        ? {
+            ...doc,
+            title,
+            content,
+            categoryIds,
+            orderByCategory: ensureKnowledgeOrderForCategories(doc.orderByCategory, categoryIds),
+            updatedAt: now,
+          }
+        : doc,
+    );
+  } else {
+    const id = createId();
+    state.knowledge.documents.unshift({
+      id,
+      title,
+      content,
+      categoryIds,
+      orderByCategory: ensureKnowledgeOrderForCategories({}, categoryIds),
+      sourceFileName: state.knowledgeEditor.sourceFileName || "",
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  state.knowledgeEditor = null;
+  state.knowledgeEditorMode = "edit";
+  state.knowledgeView = "categories";
+  saveKnowledge();
+  render();
+}
+
+function syncKnowledgeEditorDraft(form) {
+  if (!state.knowledgeEditor) return;
+  state.knowledgeEditor = {
+    ...state.knowledgeEditor,
+    title: form.elements.title.value,
+    content: form.elements.content.value,
+    categoryIds: Array.from(form.querySelectorAll('input[name="category"]:checked')).map((input) => input.value),
+  };
+}
+
+function createKnowledgeCategory(name) {
+  const now = new Date().toISOString();
+  const id = createId();
+  state.knowledge.categories.push({
+    id,
+    name,
+    order: nextKnowledgeCategoryOrder(),
+    createdAt: now,
+    updatedAt: now,
+  });
+  state.knowledgeCreatingCategory = false;
+  state.expandedKnowledgeCategories.add(id);
+  saveKnowledge();
+  render();
+}
+
+function renameKnowledgeCategory(categoryId) {
+  const category = knowledgeCategoryById(categoryId);
+  if (!category) return;
+  const name = prompt("重命名", category.name);
+  if (name === null) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  state.knowledge.categories = state.knowledge.categories.map((item) =>
+    item.id === categoryId ? { ...item, name: trimmed, updatedAt: new Date().toISOString() } : item,
+  );
+  saveKnowledge();
+  render();
+}
+
+function renameKnowledgeDocument(documentId) {
+  const doc = knowledgeDocumentById(documentId);
+  if (!doc) return;
+  const title = prompt("重命名", doc.title);
+  if (title === null) return;
+  const trimmed = title.trim();
+  if (!trimmed) return;
+  state.knowledge.documents = state.knowledge.documents.map((item) =>
+    item.id === documentId ? { ...item, title: trimmed, updatedAt: new Date().toISOString() } : item,
+  );
+  saveKnowledge();
+  render();
+}
+
+function updateKnowledgeDocumentCategories(documentId, categoryIds) {
+  const normalized = normalizeKnowledgeCategoryIds(categoryIds);
+  state.knowledge.documents = state.knowledge.documents.map((doc) =>
+    doc.id === documentId
+      ? {
+          ...doc,
+          categoryIds: normalized,
+          orderByCategory: ensureKnowledgeOrderForCategories(doc.orderByCategory, normalized),
+          updatedAt: new Date().toISOString(),
+        }
+      : doc,
+  );
+  state.knowledgeClassifyingDocumentId = null;
+  saveKnowledge();
+  render();
+}
+
+function deleteKnowledgeCategory(categoryId) {
+  const category = knowledgeCategoryById(categoryId);
+  if (!category || category.id === "uncategorized") return;
+  const confirmed = confirm("删除分类会把只属于这个分类的文档一起放入回收站。继续吗？");
+  if (!confirmed) return;
+
+  const deletedAt = new Date().toISOString();
+  const docsInCategory = state.knowledge.documents.filter((doc) => doc.categoryIds.includes(categoryId));
+  const removedDocs = docsInCategory.filter((doc) => doc.categoryIds.length <= 1);
+
+  state.knowledge.trash.unshift({
+    id: createId(),
+    type: "category",
+    category,
+    documents: docsInCategory,
+    deletedAt,
+  });
+  state.knowledge.categories = state.knowledge.categories.filter((item) => item.id !== categoryId);
+  state.knowledge.documents = state.knowledge.documents
+    .filter((doc) => !removedDocs.some((removed) => removed.id === doc.id))
+    .map((doc) =>
+      doc.categoryIds.includes(categoryId)
+        ? {
+            ...doc,
+            categoryIds: doc.categoryIds.filter((id) => id !== categoryId),
+            orderByCategory: removeKnowledgeOrderCategory(doc.orderByCategory, categoryId),
+            updatedAt: deletedAt,
+          }
+        : doc,
+    );
+  state.expandedKnowledgeCategories.delete(categoryId);
+  saveKnowledge();
+  render();
+}
+
+function deleteKnowledgeDocument(documentId) {
+  const doc = knowledgeDocumentById(documentId);
+  if (!doc) return;
+  const confirmed = confirm("删除后会先放入回收站，不会立刻彻底删除。继续吗？");
+  if (!confirmed) return;
+  state.knowledge.trash.unshift({
+    id: createId(),
+    type: "document",
+    document: doc,
+    deletedAt: new Date().toISOString(),
+  });
+  state.knowledge.documents = state.knowledge.documents.filter((item) => item.id !== documentId);
+  saveKnowledge();
+  render();
+}
+
+function restoreKnowledgeTrash(trashId) {
+  const item = state.knowledge.trash.find((entry) => entry.id === trashId);
+  if (!item) return;
+  restoreKnowledgeTrashItem(item);
+  state.knowledge.trash = state.knowledge.trash.filter((entry) => entry.id !== trashId);
+  saveKnowledge();
+  render();
+}
+
+function restoreKnowledgeTrashItem(item) {
+  if (item.type === "category") {
+    if (item.category && !knowledgeCategoryById(item.category.id)) {
+      state.knowledge.categories.push(item.category);
+    }
+    (item.documents || []).forEach((doc) => {
+      const existing = knowledgeDocumentById(doc.id);
+      const categoryIds = normalizeKnowledgeCategoryIds([...(existing?.categoryIds || doc.categoryIds || []), item.category?.id]);
+      if (existing) {
+        state.knowledge.documents = state.knowledge.documents.map((current) =>
+          current.id === doc.id
+            ? {
+                ...current,
+                categoryIds,
+                orderByCategory: ensureKnowledgeOrderForCategories(current.orderByCategory, categoryIds),
+                updatedAt: new Date().toISOString(),
+              }
+            : current,
+        );
+      } else {
+        state.knowledge.documents.push({
+          ...doc,
+          categoryIds,
+          orderByCategory: ensureKnowledgeOrderForCategories(doc.orderByCategory, categoryIds),
+        });
+      }
+    });
+    if (item.category?.id) state.expandedKnowledgeCategories.add(item.category.id);
+  }
+  if (item.type === "document" && item.document) {
+    const categoryIds = normalizeKnowledgeCategoryIds(
+      item.document.categoryIds.filter((id) => id === "uncategorized" || knowledgeCategoryById(id)),
+    );
+    if (!knowledgeDocumentById(item.document.id)) {
+      state.knowledge.documents.push({
+        ...item.document,
+        categoryIds,
+        orderByCategory: ensureKnowledgeOrderForCategories(item.document.orderByCategory, categoryIds),
+      });
+    }
+  }
+}
+
+function purgeKnowledgeTrash(trashId) {
+  const confirmed = confirm("彻底删除后不能从回收站恢复。继续吗？");
+  if (!confirmed) return;
+  state.knowledge.trash = state.knowledge.trash.filter((entry) => entry.id !== trashId);
+  saveKnowledge();
+  render();
+}
+
+function deleteSelectedKnowledgeItems() {
+  const selectedCategoryIds = selectedKnowledgeCategoryIds();
+  const selectedDocumentIds = selectedKnowledgeDocumentIds();
+  const deletableCategoryIds = selectedCategoryIds.filter((id) => id !== "uncategorized");
+  const selectedDocuments = selectedDocumentIds.map(knowledgeDocumentById).filter(Boolean);
+  if (!deletableCategoryIds.length && !selectedDocuments.length) {
+    alert(selectedCategoryIds.includes("uncategorized") ? "未分类是固定分类，不能删除。" : "请先选择要删除的文件夹或文档。");
+    return;
+  }
+  const confirmed = confirm(
+    `将删除 ${deletableCategoryIds.length} 个分类、${selectedDocuments.length} 篇文档，删除内容会先进入回收站。继续吗？`,
+  );
+  if (!confirmed) return;
+
+  const deletedAt = new Date().toISOString();
+  const explicitDocumentIds = new Set(selectedDocuments.map((doc) => doc.id));
+  deletableCategoryIds.forEach((categoryId) => deleteKnowledgeCategoryDirect(categoryId, deletedAt, explicitDocumentIds));
+  selectedDocuments.forEach((doc) => {
+    state.knowledge.trash.unshift({
+      id: createId(),
+      type: "document",
+      document: doc,
+      deletedAt,
+    });
+  });
+  state.knowledge.documents = state.knowledge.documents.filter((doc) => !explicitDocumentIds.has(doc.id));
+  resetKnowledgeBatch();
+  saveKnowledge();
+  render();
+}
+
+function deleteKnowledgeCategoryDirect(categoryId, deletedAt, excludedDocumentIds = new Set()) {
+  const category = knowledgeCategoryById(categoryId);
+  if (!category || category.id === "uncategorized") return;
+  const docsInCategory = state.knowledge.documents.filter((doc) => doc.categoryIds.includes(categoryId) && !excludedDocumentIds.has(doc.id));
+  const removedDocs = docsInCategory.filter((doc) => doc.categoryIds.length <= 1);
+  const removedDocIds = new Set(removedDocs.map((doc) => doc.id));
+
+  state.knowledge.trash.unshift({
+    id: createId(),
+    type: "category",
+    category,
+    documents: docsInCategory,
+    deletedAt,
+  });
+  state.knowledge.categories = state.knowledge.categories.filter((item) => item.id !== categoryId);
+  state.knowledge.documents = state.knowledge.documents
+    .filter((doc) => !removedDocIds.has(doc.id))
+    .map((doc) =>
+      doc.categoryIds.includes(categoryId)
+        ? {
+            ...doc,
+            categoryIds: doc.categoryIds.filter((id) => id !== categoryId),
+            orderByCategory: removeKnowledgeOrderCategory(doc.orderByCategory, categoryId),
+            updatedAt: deletedAt,
+          }
+        : doc,
+    );
+  state.expandedKnowledgeCategories.delete(categoryId);
+}
+
+function moveSelectedKnowledgeDocuments() {
+  const selectedDocumentIds = selectedKnowledgeDocumentIds();
+  if (!selectedDocumentIds.length) {
+    alert("请先选择要移动的文档。");
+    return;
+  }
+  const targetId = state.knowledgeBatch.moveTargetId;
+  if (!knowledgeCategoryById(targetId)) {
+    alert("目标分类不存在，请重新选择。");
+    return;
+  }
+  const now = new Date().toISOString();
+  state.knowledge.documents = state.knowledge.documents.map((doc) => {
+    if (!selectedDocumentIds.includes(doc.id)) return doc;
+    let categoryIds;
+    if (state.knowledgeBatch.moveMode === "replace") {
+      categoryIds = [targetId];
+    } else if (targetId === "uncategorized") {
+      categoryIds = doc.categoryIds.length ? doc.categoryIds : ["uncategorized"];
+    } else {
+      categoryIds = Array.from(new Set([...doc.categoryIds.filter((id) => id !== "uncategorized"), targetId]));
+    }
+    const normalized = normalizeKnowledgeCategoryIds(categoryIds);
+    return {
+      ...doc,
+      categoryIds: normalized,
+      orderByCategory: ensureKnowledgeOrderForCategories(doc.orderByCategory, normalized),
+      updatedAt: now,
+    };
+  });
+  resetKnowledgeBatch();
+  saveKnowledge();
+  render();
+}
+
+function exportSelectedKnowledgeItems() {
+  const selectedCategoryIds = selectedKnowledgeCategoryIds();
+  const selectedDocumentIds = selectedKnowledgeDocumentIds();
+  if (!selectedCategoryIds.length && !selectedDocumentIds.length) {
+    alert("请先选择要导出的文件夹或文档。");
+    return;
+  }
+  const files = [];
+  const usedNames = new Set();
+  const exportedDocumentIds = new Set();
+
+  selectedCategoryIds.forEach((categoryId) => {
+    const category = knowledgeCategoryById(categoryId);
+    if (!category) return;
+    const docs = documentsForCategory(categoryId);
+    if (!docs.length) {
+      addKnowledgeZipFile(files, usedNames, `${safeFileName(category.name)}/_空分类.txt`, "这个分类里还没有文档。");
+      return;
+    }
+    docs.forEach((doc) => {
+      exportedDocumentIds.add(doc.id);
+      addKnowledgeZipFile(files, usedNames, `${safeFileName(category.name)}/${safeFileName(doc.title)}.md`, doc.content);
+    });
+  });
+
+  selectedDocumentIds.forEach((documentId) => {
+    if (exportedDocumentIds.has(documentId)) return;
+    const doc = knowledgeDocumentById(documentId);
+    if (!doc) return;
+    addKnowledgeZipFile(files, usedNames, `选中文档/${safeFileName(doc.title)}.md`, doc.content);
+  });
+
+  if (!files.length) {
+    alert("没有可以导出的内容。");
+    return;
+  }
+  downloadBackupFile(createZipBlob(files), `Workbuddy知识文库批量导出-${toISODate(new Date())}.zip`);
+}
+
+function addKnowledgeZipFile(files, usedNames, name, content) {
+  const uniqueName = uniqueKnowledgeZipName(usedNames, name);
+  usedNames.add(uniqueName);
+  files.push({ name: uniqueName, content });
+}
+
+function uniqueKnowledgeZipName(usedNames, name) {
+  if (!usedNames.has(name)) return name;
+  const dot = name.lastIndexOf(".");
+  const base = dot > -1 ? name.slice(0, dot) : name;
+  const extension = dot > -1 ? name.slice(dot) : "";
+  let index = 2;
+  let candidate = `${base} (${index})${extension}`;
+  while (usedNames.has(candidate)) {
+    index += 1;
+    candidate = `${base} (${index})${extension}`;
+  }
+  return candidate;
+}
+
+function restoreSelectedKnowledgeTrash() {
+  const selectedTrashIds = selectedKnowledgeTrashIds();
+  if (!selectedTrashIds.length) {
+    alert("请先选择要恢复的内容。");
+    return;
+  }
+  const selected = new Set(selectedTrashIds);
+  state.knowledge.trash.forEach((item) => {
+    if (selected.has(item.id)) restoreKnowledgeTrashItem(item);
+  });
+  state.knowledge.trash = state.knowledge.trash.filter((item) => !selected.has(item.id));
+  resetKnowledgeBatch();
+  saveKnowledge();
+  render();
+}
+
+function purgeSelectedKnowledgeTrash() {
+  const selectedTrashIds = selectedKnowledgeTrashIds();
+  if (!selectedTrashIds.length) {
+    alert("请先选择要彻底删除的内容。");
+    return;
+  }
+  const confirmed = confirm(`将彻底删除 ${selectedTrashIds.length} 项，删除后不能从回收站恢复。继续吗？`);
+  if (!confirmed) return;
+  const selected = new Set(selectedTrashIds);
+  state.knowledge.trash = state.knowledge.trash.filter((item) => !selected.has(item.id));
+  resetKnowledgeBatch();
+  saveKnowledge();
+  render();
+}
+
+function importKnowledgeDocument(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const isSupported = /\.(md|txt)$/i.test(file.name) || ["text/markdown", "text/plain"].includes(file.type);
+  if (!isSupported) {
+    alert("请导入 .md 或 .txt 文件。");
+    event.target.value = "";
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const title = file.name.replace(/\.(md|txt)$/i, "");
+    state.knowledgeEditor = createKnowledgeEditorDraft({
+      title,
+      content: String(reader.result || ""),
+      sourceFileName: file.name,
+    });
+    state.knowledgeEditorMode = "edit";
+    state.knowledgeView = "new";
+    event.target.value = "";
+    render();
+  };
+  reader.onerror = () => {
+    alert("导入失败，请重新选择文件。");
+    event.target.value = "";
+  };
+  reader.readAsText(file);
+}
+
+function exportKnowledgeDocument(documentId) {
+  const doc = knowledgeDocumentById(documentId);
+  if (!doc) return;
+  downloadBackupFile(new Blob([doc.content], { type: "text/markdown;charset=utf-8" }), `${safeFileName(doc.title)}.md`);
+}
+
+function exportKnowledgeCategory(categoryId) {
+  const category = knowledgeCategoryById(categoryId);
+  if (!category) return;
+  const docs = documentsForCategory(categoryId);
+  if (!docs.length) {
+    alert("这个分类里还没有可以导出的文档。");
+    return;
+  }
+  const files = docs.map((doc) => ({
+    name: `${safeFileName(category.name)}/${safeFileName(doc.title)}.md`,
+    content: doc.content,
+  }));
+  downloadBackupFile(createZipBlob(files), `${safeFileName(category.name)}.zip`);
+}
+
+function toggleKnowledgeCategory(categoryId) {
+  if (state.expandedKnowledgeCategories.has(categoryId)) {
+    state.expandedKnowledgeCategories.delete(categoryId);
+  } else {
+    state.expandedKnowledgeCategories.add(categoryId);
+  }
+  render();
+}
+
+function activeKnowledgeDocuments() {
+  return state.knowledge.documents;
+}
+
+function knowledgeCategoryById(categoryId) {
+  return state.knowledge.categories.find((category) => category.id === categoryId) || null;
+}
+
+function knowledgeDocumentById(documentId) {
+  return state.knowledge.documents.find((doc) => doc.id === documentId) || null;
+}
+
+function knowledgeCategoryName(categoryId) {
+  return knowledgeCategoryById(categoryId)?.name || "未分类";
+}
+
+function sortedKnowledgeCategories() {
+  const categories = [...state.knowledge.categories];
+  if (state.knowledgeCategorySort === "az") {
+    return categories.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN") || (a.order || 0) - (b.order || 0));
+  }
+  return categories.sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name, "zh-Hans-CN"));
+}
+
+function documentsForCategory(categoryId) {
+  return activeKnowledgeDocuments()
+    .filter((doc) => doc.categoryIds.includes(categoryId))
+    .sort((a, b) => sortKnowledgeDocuments(a, b, categoryId));
+}
+
+function sortKnowledgeDocuments(a, b, categoryId = null) {
+  if (state.knowledgeDocumentSort === "az") {
+    return a.title.localeCompare(b.title, "zh-Hans-CN") || (a.createdAt || "").localeCompare(b.createdAt || "");
+  }
+  if (state.knowledgeDocumentSort === "updatedAt") {
+    return (b.updatedAt || b.createdAt || "").localeCompare(a.updatedAt || a.createdAt || "") || a.title.localeCompare(b.title, "zh-Hans-CN");
+  }
+  const firstOrder = categoryId ? a.orderByCategory?.[categoryId] || 0 : 0;
+  const secondOrder = categoryId ? b.orderByCategory?.[categoryId] || 0 : 0;
+  return firstOrder - secondOrder || (a.createdAt || "").localeCompare(b.createdAt || "");
+}
+
+function normalizeKnowledgeCategoryIds(categoryIds) {
+  const existingIds = new Set(state.knowledge.categories.map((category) => category.id));
+  const ids = Array.from(new Set((categoryIds || []).filter((id) => existingIds.has(id))));
+  return ids.length ? ids : ["uncategorized"];
+}
+
+function ensureKnowledgeOrderForCategories(orderByCategory, categoryIds) {
+  const next = {};
+  categoryIds.forEach((categoryId) => {
+    next[categoryId] = normalizeNonNegativeInteger(orderByCategory?.[categoryId]) || nextKnowledgeDocumentOrder(categoryId);
+  });
+  return next;
+}
+
+function removeKnowledgeOrderCategory(orderByCategory, categoryId) {
+  const next = { ...(orderByCategory || {}) };
+  delete next[categoryId];
+  return next;
+}
+
+function nextKnowledgeCategoryOrder() {
+  return Math.max(0, ...state.knowledge.categories.map((category) => normalizeNonNegativeInteger(category.order))) + 1;
+}
+
+function nextKnowledgeDocumentOrder(categoryId) {
+  return Math.max(0, ...state.knowledge.documents.map((doc) => normalizeNonNegativeInteger(doc.orderByCategory?.[categoryId]))) + 1;
+}
+
+function formatKnowledgeTime(value) {
+  if (!value) return "暂无时间";
+  return formatTaskDate(value.slice(0, 10));
+}
+
+function renderMarkdownPreview(content) {
+  const lines = String(content || "").replace(/\r\n?/g, "\n").split("\n");
+  const blocks = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+
+    const fence = line.match(/^```(.*)$/);
+    if (fence) {
+      const codeLines = [];
+      index += 1;
+      while (index < lines.length && !/^```/.test(lines[index])) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      blocks.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+      continue;
+    }
+
+    if (/^---+$/.test(line.trim())) {
+      blocks.push("<hr />");
+      index += 1;
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      const level = heading[1].length;
+      blocks.push(`<h${level}>${renderMarkdownInline(heading[2].trim())}</h${level}>`);
+      index += 1;
+      continue;
+    }
+
+    if (/^\s*>\s?/.test(line)) {
+      const quoteLines = [];
+      while (index < lines.length && /^\s*>\s?/.test(lines[index])) {
+        quoteLines.push(lines[index].replace(/^\s*>\s?/, ""));
+        index += 1;
+      }
+      blocks.push(`<blockquote>${quoteLines.map((item) => `<p>${renderMarkdownInline(item)}</p>`).join("")}</blockquote>`);
+      continue;
+    }
+
+    if (/^\s*([-*+])\s+/.test(line) || /^\s*\d+\.\s+/.test(line)) {
+      const ordered = /^\s*\d+\.\s+/.test(line);
+      const items = [];
+      while (
+        index < lines.length &&
+        (ordered ? /^\s*\d+\.\s+/.test(lines[index]) : /^\s*[-*+]\s+/.test(lines[index]))
+      ) {
+        items.push(lines[index].replace(ordered ? /^\s*\d+\.\s+/ : /^\s*[-*+]\s+/, ""));
+        index += 1;
+      }
+      const tag = ordered ? "ol" : "ul";
+      blocks.push(`<${tag}>${items.map((item) => `<li>${renderMarkdownInline(item)}</li>`).join("")}</${tag}>`);
+      continue;
+    }
+
+    const paragraph = [line.trim()];
+    index += 1;
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !/^```/.test(lines[index]) &&
+      !/^---+$/.test(lines[index].trim()) &&
+      !/^(#{1,6})\s+/.test(lines[index]) &&
+      !/^\s*>\s?/.test(lines[index]) &&
+      !/^\s*([-*+])\s+/.test(lines[index]) &&
+      !/^\s*\d+\.\s+/.test(lines[index])
+    ) {
+      paragraph.push(lines[index].trim());
+      index += 1;
+    }
+    blocks.push(`<p>${renderMarkdownInline(paragraph.join(" "))}</p>`);
+  }
+
+  return blocks.length ? blocks.join("") : '<div class="knowledge-preview-empty">暂无内容</div>';
+}
+
+function renderMarkdownInline(value) {
+  const placeholders = [];
+  const token = (html) => {
+    const key = `\u0000MD${placeholders.length}\u0000`;
+    placeholders.push([key, html]);
+    return key;
+  };
+
+  let text = String(value || "").replace(/`([^`]+)`/g, (_, code) => token(`<code>${escapeHtml(code)}</code>`));
+  text = text.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) => {
+    const safeUrl = sanitizeMarkdownUrl(url);
+    if (!safeUrl) return `${label} (${url})`;
+    return token(`<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`);
+  });
+
+  let html = escapeHtml(text);
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+  html = html.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
+  html = html.replace(/(^|[^_])_([^_]+)_/g, "$1<em>$2</em>");
+  placeholders.forEach(([key, replacement]) => {
+    html = html.replaceAll(key, replacement);
+  });
+  return html;
+}
+
+function sanitizeMarkdownUrl(value) {
+  const url = String(value || "").trim();
+  if (!url) return "";
+  if (/^(https?:|mailto:|#|\/|\.\/|\.\.\/)/i.test(url)) return url;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
+  return "";
+}
+
+function safeFileName(value) {
+  const cleaned = String(value || "未命名文档")
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || "未命名文档";
+}
+
+function createZipBlob(files) {
+  const encoder = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+
+  files.forEach((file) => {
+    const nameBytes = encoder.encode(file.name);
+    const contentBytes = encoder.encode(file.content);
+    const crc = crc32(contentBytes);
+    const localHeader = createZipHeader(0x04034b50, nameBytes, contentBytes.length, crc);
+    localParts.push(localHeader, nameBytes, contentBytes);
+
+    const centralHeader = createZipHeader(0x02014b50, nameBytes, contentBytes.length, crc, offset);
+    centralParts.push(centralHeader, nameBytes);
+    offset += localHeader.length + nameBytes.length + contentBytes.length;
+  });
+
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+  const end = new Uint8Array(22);
+  const view = new DataView(end.buffer);
+  view.setUint32(0, 0x06054b50, true);
+  view.setUint16(8, files.length, true);
+  view.setUint16(10, files.length, true);
+  view.setUint32(12, centralSize, true);
+  view.setUint32(16, offset, true);
+
+  return new Blob([...localParts, ...centralParts, end], { type: "application/zip" });
+}
+
+function createZipHeader(signature, nameBytes, size, crc, localOffset = 0) {
+  const isCentral = signature === 0x02014b50;
+  const header = new Uint8Array(isCentral ? 46 : 30);
+  const view = new DataView(header.buffer);
+  view.setUint32(0, signature, true);
+  if (isCentral) {
+    view.setUint16(4, 20, true);
+    view.setUint16(6, 20, true);
+    view.setUint16(8, 0x0800, true);
+    view.setUint32(16, crc, true);
+    view.setUint32(20, size, true);
+    view.setUint32(24, size, true);
+    view.setUint16(28, nameBytes.length, true);
+    view.setUint32(42, localOffset, true);
+  } else {
+    view.setUint16(4, 20, true);
+    view.setUint16(6, 0x0800, true);
+    view.setUint32(14, crc, true);
+    view.setUint32(18, size, true);
+    view.setUint32(22, size, true);
+    view.setUint16(26, nameBytes.length, true);
+  }
+  return header;
+}
+
+function crc32(bytes) {
+  let crc = -1;
+  for (let index = 0; index < bytes.length; index += 1) {
+    crc ^= bytes[index];
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+  return (crc ^ -1) >>> 0;
 }
 
 function bindEnglishWordActions(container, word, bank) {
@@ -1727,6 +3131,7 @@ function createBirthdayEditor(entry) {
 
 function filteredEntries() {
   if (state.module === "english") return [];
+  if (state.module === "knowledge") return [];
   if (state.view === "search") return searchResults();
   if (state.view === "birthday") return birthdayEntries();
   return filterByStatus(baseEntriesForView(), currentStatusFilter()).sort(sortEntries);
@@ -1914,12 +3319,24 @@ function currentViewTitle() {
     };
     return titles[state.englishView] || "每日英语";
   }
+  if (state.module === "knowledge") {
+    const titles = {
+      categories: "知识文库",
+      new: "新建",
+      import: "导入",
+      trash: "回收站",
+    };
+    return titles[state.knowledgeView] || "知识文库";
+  }
   if (state.view === "today") return formatShortDate(parseISODate(state.selectedDate));
   return viewTitles[state.view];
 }
 
 function currentViewMeta(entries) {
-  if (state.module === "english") return "模块骨架";
+  if (state.module === "english") return `${englishBankStats(currentEnglishBank().id).learned}/${currentEnglishBank().words.length} 已学`;
+  if (state.module === "knowledge") {
+    return `${state.knowledge.categories.length} 个分类 · ${state.knowledge.documents.length} 篇文档`;
+  }
   if (state.view === "search") return `${countSearchResults(entries)} 项匹配`;
   if (state.view === "birthday") return `${entries.length} 个生日`;
   if (state.view === "medium") return `${entries.length} 个目标 · ${formatRatio(goalCompletionStats(allMediumGoals()))} 已完成`;
@@ -1979,6 +3396,15 @@ function canReorderCurrentView() {
   return state.module === "planner" && ["today", "medium"].includes(state.view) && currentStatusFilter() === "all";
 }
 
+function canReorderKnowledgeView() {
+  return (
+    state.module === "knowledge" &&
+    state.knowledgeView === "categories" &&
+    (!state.knowledgeSearch || state.knowledgeSearch.length === 0) &&
+    (state.knowledgeCategorySort === "custom" || state.knowledgeDocumentSort === "custom")
+  );
+}
+
 function setupDraggableElement(element, entry) {
   if (!canReorderCurrentView() || isEditingEntry(entry)) return;
   element.dataset.entryKey = serializeEntryKey(editKey(entry));
@@ -2025,6 +3451,68 @@ function setupDraggableElement(element, entry) {
   });
 }
 
+function setupKnowledgeDraggableElement(element, key) {
+  if (state.module !== "knowledge" || state.knowledgeView !== "categories" || state.knowledgeSearch) return;
+  if (state.knowledgeBatch.active) return;
+  if (key.kind === "category" && state.knowledgeCategorySort !== "custom") return;
+  if (key.kind === "document" && (!key.categoryId || state.knowledgeDocumentSort !== "custom")) return;
+  const handle = element.querySelector("[data-drag-handle]");
+  if (!handle) return;
+
+  element.dataset.knowledgeKey = serializeKnowledgeKey(key);
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    state.knowledgeDragging = key;
+    state.knowledgeDragTarget = null;
+    state.knowledgeDropAfter = false;
+    element.classList.add("is-dragging");
+    event.preventDefault();
+
+    const onPointerMove = (moveEvent) => {
+      const target = knowledgeDropTargetFromPoint(moveEvent.clientX, moveEvent.clientY, key);
+      clearDropTargets();
+      if (!target || target === element) return;
+      const targetKey = parseKnowledgeKey(target.dataset.knowledgeKey);
+      if (!targetKey || !sameKnowledgeKeyLayer(key, targetKey) || sameKnowledgeKey(key, targetKey)) return;
+      const rect = target.getBoundingClientRect();
+      const after = moveEvent.clientY > rect.top + rect.height / 2;
+      target.classList.toggle("drop-before", !after);
+      target.classList.toggle("drop-after", after);
+      state.knowledgeDragTarget = targetKey;
+      state.knowledgeDropAfter = after;
+    };
+
+    const onPointerUp = () => {
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+      element.classList.remove("is-dragging");
+      clearDropTargets();
+      if (state.knowledgeDragging && state.knowledgeDragTarget) {
+        reorderKnowledgeItems(state.knowledgeDragging, state.knowledgeDragTarget, state.knowledgeDropAfter);
+      }
+      state.knowledgeDragging = null;
+      state.knowledgeDragTarget = null;
+      state.knowledgeDropAfter = false;
+    };
+
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+  });
+}
+
+function knowledgeDropTargetFromPoint(x, y, sourceKey) {
+  const candidates = [];
+  document.elementsFromPoint(x, y).forEach((element) => {
+    const target = element.closest("[data-knowledge-key]");
+    if (target && !candidates.includes(target)) candidates.push(target);
+  });
+  return candidates.find((target) => {
+    const targetKey = parseKnowledgeKey(target.dataset.knowledgeKey);
+    return targetKey && sameKnowledgeKeyLayer(sourceKey, targetKey) && !sameKnowledgeKey(sourceKey, targetKey);
+  });
+}
+
 function clearDropTargets() {
   elements.taskList.querySelectorAll(".drop-before, .drop-after").forEach((item) => {
     item.classList.remove("drop-before", "drop-after");
@@ -2064,8 +3552,74 @@ function setEntryOrder(key, order) {
   });
 }
 
+function reorderKnowledgeItems(sourceKey, targetKey, after) {
+  if (!sameKnowledgeKeyLayer(sourceKey, targetKey)) return;
+
+  if (sourceKey.kind === "category") {
+    const categories = sortedKnowledgeCategories();
+    const reordered = reorderByIds(categories, sourceKey.id, targetKey.id, after);
+    reordered.forEach((category, index) => {
+      category.order = index + 1;
+      category.updatedAt = new Date().toISOString();
+    });
+    state.knowledge.categories = state.knowledge.categories.map((category) => {
+      const updated = reordered.find((item) => item.id === category.id);
+      return updated || category;
+    });
+  }
+
+  if (sourceKey.kind === "document") {
+    const docs = documentsForCategory(sourceKey.categoryId);
+    const reordered = reorderByIds(docs, sourceKey.id, targetKey.id, after);
+    reordered.forEach((doc, index) => {
+      doc.orderByCategory = {
+        ...(doc.orderByCategory || {}),
+        [sourceKey.categoryId]: index + 1,
+      };
+    });
+    state.knowledge.documents = state.knowledge.documents.map((doc) => {
+      const updated = reordered.find((item) => item.id === doc.id);
+      return updated || doc;
+    });
+  }
+
+  saveKnowledge();
+  render();
+}
+
+function reorderByIds(items, sourceId, targetId, after) {
+  const sourceIndex = items.findIndex((item) => item.id === sourceId);
+  const targetIndex = items.findIndex((item) => item.id === targetId);
+  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return items;
+
+  const ordered = [...items];
+  const [moved] = ordered.splice(sourceIndex, 1);
+  let insertIndex = ordered.findIndex((item) => item.id === targetId);
+  if (after) insertIndex += 1;
+  ordered.splice(insertIndex, 0, moved);
+  return ordered;
+}
+
 function serializeEntryKey(key) {
   return `${key.kind}:${key.parentId || ""}:${key.id}`;
+}
+
+function serializeKnowledgeKey(key) {
+  return `${key.kind}:${key.categoryId || ""}:${key.id}`;
+}
+
+function parseKnowledgeKey(value) {
+  const [kind, categoryId, id] = String(value || "").split(":");
+  if (!kind || !id) return null;
+  return { kind, categoryId: categoryId || null, id };
+}
+
+function sameKnowledgeKey(first, second) {
+  return first?.kind === second?.kind && first?.id === second?.id && first?.categoryId === second?.categoryId;
+}
+
+function sameKnowledgeKeyLayer(first, second) {
+  return first?.kind === second?.kind && (first.kind === "category" || first.categoryId === second.categoryId);
 }
 
 function parseEntryKey(value) {
@@ -2389,7 +3943,13 @@ async function exportTasks() {
   const blob = new Blob(
     [
       JSON.stringify(
-        { exportedAt: exportedAt.toISOString(), tasks: state.tasks, birthdays: state.birthdays, english: state.english },
+        {
+          exportedAt: exportedAt.toISOString(),
+          tasks: state.tasks,
+          birthdays: state.birthdays,
+          english: state.english,
+          knowledge: state.knowledge,
+        },
         null,
         2,
       ),
@@ -2436,7 +3996,7 @@ function importTasks(event) {
   const file = event.target.files?.[0];
   if (!file) return;
 
-  const shouldImport = confirm("导入备份会覆盖当前任务、生日和英语学习数据。建议先确认当前数据已经导出到坚果云。继续导入吗？");
+  const shouldImport = confirm("导入备份会覆盖当前任务、生日、英语学习和知识文库数据。建议先确认当前数据已经导出到坚果云。继续导入吗？");
   if (!shouldImport) {
     event.target.value = "";
     return;
@@ -2451,9 +4011,11 @@ function importTasks(event) {
       state.tasks = normalizeTasks(parsed.tasks).filter((task) => task.title && typeof task.title === "string");
       state.birthdays = normalizeBirthdays(parsed.birthdays);
       state.english = normalizeEnglish(parsed.english);
+      state.knowledge = parsed.knowledge ? normalizeKnowledge(parsed.knowledge) : state.knowledge;
       saveTasks();
       saveBirthdays();
       saveEnglish();
+      saveKnowledge();
       renderBackupState();
       render();
       showBackupStatus(`已导入：${file.name}`);
@@ -2475,6 +4037,7 @@ function saveImportBackup() {
       tasks: state.tasks,
       birthdays: state.birthdays,
       english: state.english,
+      knowledge: state.knowledge,
     }),
   );
 }
@@ -2482,7 +4045,7 @@ function saveImportBackup() {
 function restoreImportBackup() {
   const raw = readImportBackup();
   if (!raw) return;
-  const shouldRestore = confirm("这会用最近一次导入前的本机数据覆盖当前任务、生日和英语学习数据。继续恢复吗？");
+  const shouldRestore = confirm("这会用最近一次导入前的本机数据覆盖当前任务、生日、英语学习和知识文库数据。继续恢复吗？");
   if (!shouldRestore) return;
 
   try {
@@ -2491,11 +4054,13 @@ function restoreImportBackup() {
     state.tasks = normalizeTasks(parsed.tasks).filter((task) => task.title && typeof task.title === "string");
     state.birthdays = normalizeBirthdays(parsed.birthdays);
     state.english = normalizeEnglish(parsed.english);
+    state.knowledge = parsed.knowledge ? normalizeKnowledge(parsed.knowledge) : state.knowledge;
     saveTasks();
     saveBirthdays();
     saveEnglish();
+    saveKnowledge();
     render();
-    showBackupStatus("已恢复导入前数据");
+    showBackupStatus("已恢复数据");
   } catch {
     alert("恢复失败，导入前备份不可用。");
     showBackupStatus("恢复失败");
@@ -2557,6 +4122,16 @@ function loadEnglish() {
     return normalizeEnglish();
   } catch {
     return normalizeEnglish();
+  }
+}
+
+function loadKnowledge() {
+  try {
+    const raw = localStorage.getItem(knowledgeStorageKey);
+    if (raw) return normalizeKnowledge(JSON.parse(raw));
+    return normalizeKnowledge();
+  } catch {
+    return normalizeKnowledge();
   }
 }
 
@@ -2647,6 +4222,85 @@ function normalizeEnglishGroups(groups) {
     }));
 }
 
+function normalizeKnowledge(knowledge = {}) {
+  const now = new Date().toISOString();
+  const categories = normalizeKnowledgeCategories(knowledge.categories, now);
+  const categoryIds = new Set(categories.map((category) => category.id));
+  const documents = normalizeKnowledgeDocuments(knowledge.documents, categoryIds, now);
+  return {
+    categories,
+    documents,
+    trash: normalizeKnowledgeTrash(knowledge.trash, now),
+  };
+}
+
+function normalizeKnowledgeCategories(categories, now) {
+  const normalized = Array.isArray(categories)
+    ? categories
+        .filter((category) => category?.id && category?.name)
+        .map((category, index) => ({
+          id: String(category.id),
+          name: String(category.name),
+          order: normalizeNonNegativeInteger(category.order) || index + 1,
+          createdAt: category.createdAt || now,
+          updatedAt: category.updatedAt || null,
+        }))
+    : [];
+
+  const defaultCategory = normalized.find((category) => category.id === "uncategorized");
+  const withoutDefault = normalized.filter((category) => category.id !== "uncategorized");
+  return [
+    {
+      id: "uncategorized",
+      name: defaultCategory?.name || "未分类",
+      order: normalizeNonNegativeInteger(defaultCategory?.order),
+      createdAt: defaultCategory?.createdAt || now,
+      updatedAt: defaultCategory?.updatedAt || null,
+    },
+    ...withoutDefault,
+  ];
+}
+
+function normalizeKnowledgeDocuments(documents, categoryIds, now) {
+  if (!Array.isArray(documents)) return [];
+  return documents
+    .filter((doc) => doc?.id && typeof doc.title === "string")
+    .map((doc, index) => {
+      const ids = Array.isArray(doc.categoryIds)
+        ? doc.categoryIds.map(String).filter((id) => categoryIds.has(id))
+        : [];
+      const normalizedIds = ids.length ? Array.from(new Set(ids)) : ["uncategorized"];
+      return {
+        id: String(doc.id),
+        title: doc.title || "未命名文档",
+        content: typeof doc.content === "string" ? doc.content : "",
+        categoryIds: normalizedIds,
+        orderByCategory: normalizeKnowledgeOrderByCategory(doc.orderByCategory, normalizedIds, index + 1),
+        sourceFileName: typeof doc.sourceFileName === "string" ? doc.sourceFileName : "",
+        createdAt: doc.createdAt || now,
+        updatedAt: doc.updatedAt || doc.createdAt || now,
+      };
+    });
+}
+
+function normalizeKnowledgeOrderByCategory(orderByCategory, categoryIds, fallbackOrder) {
+  const source = orderByCategory && typeof orderByCategory === "object" ? orderByCategory : {};
+  return Object.fromEntries(
+    categoryIds.map((categoryId) => [categoryId, normalizeNonNegativeInteger(source[categoryId]) || fallbackOrder]),
+  );
+}
+
+function normalizeKnowledgeTrash(trash, now) {
+  if (!Array.isArray(trash)) return [];
+  return trash
+    .filter((item) => item?.id && (item.type === "category" || item.type === "document"))
+    .map((item) => ({
+      ...item,
+      id: String(item.id),
+      deletedAt: item.deletedAt || now,
+    }));
+}
+
 function normalizeTask(task) {
   const scope = task.scope === "medium" ? "medium" : "schedule";
   const children = normalizeChildren(task.children);
@@ -2703,6 +4357,10 @@ function saveBirthdays() {
 
 function saveEnglish() {
   localStorage.setItem(englishStorageKey, JSON.stringify(state.english));
+}
+
+function saveKnowledge() {
+  localStorage.setItem(knowledgeStorageKey, JSON.stringify(state.knowledge));
 }
 
 function rolloverOpenScheduleTasks() {
@@ -2814,7 +4472,7 @@ function seedTasks() {
 
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
+    navigator.serviceWorker.register("./sw.js?v=50").catch(() => {});
   }
 }
 
@@ -3047,8 +4705,14 @@ function createId() {
 }
 
 function escapeHtml(value) {
-  return value.replace(/[&<>"']/g, (char) => {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => {
     const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" };
     return map[char];
   });
+}
+
+function cssEscape(value) {
+  const text = String(value ?? "");
+  if (window.CSS?.escape) return window.CSS.escape(text);
+  return text.replace(/["\\]/g, "\\$&");
 }

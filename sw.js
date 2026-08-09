@@ -1,11 +1,11 @@
-const cacheName = "workbuddy-v36";
+const cacheName = "workbuddy-v50";
 const assets = [
   "./",
   "./index.html",
-  "./styles.css",
-  "./app.js",
+  "./styles.css?v=50",
+  "./app.js?v=50",
   "./english-wordbanks.js",
-  "./manifest.webmanifest",
+  "./manifest.webmanifest?v=50",
   "./icon.svg",
 ];
 
@@ -25,6 +25,20 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(cacheName).then((cache) => cache.put("./index.html", copy));
+          return response;
+        })
+        .catch(() => caches.match("./index.html")),
+    );
+    return;
+  }
+
   event.respondWith(
     fetch(event.request)
       .then((response) => {
