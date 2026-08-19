@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f8fafc" />
     <title>Workbuddy</title>
-    <link rel="manifest" href="./manifest.webmanifest?v=50" />
-    <link rel="stylesheet" href="./styles.css?v=50" />
+    <link rel="manifest" href="./manifest.webmanifest?v=63" />
+    <link rel="stylesheet" href="./styles.css?v=63" />
   </head>
   <body>
     <div class="app-shell">
@@ -28,6 +28,9 @@
             </button>
             <button class="module-button" type="button" data-module="knowledge">
               <span>知识文库</span>
+            </button>
+            <button class="module-button" type="button" data-module="shopping">
+              <span>商品比价</span>
             </button>
           </nav>
 
@@ -63,6 +66,10 @@
               <div class="stat">
                 <span class="stat-label">中期</span>
                 <strong id="mediumCount">0</strong>
+              </div>
+              <div class="stat">
+                <span class="stat-label">周期</span>
+                <strong id="recurrenceCount">0</strong>
               </div>
               <div class="stat">
                 <span class="stat-label">生日</span>
@@ -127,6 +134,7 @@
               <button class="segment is-active" type="button" data-view="today">今天</button>
               <button class="segment" type="button" data-view="schedule">日程</button>
               <button class="segment" type="button" data-view="medium">中期</button>
+              <button class="segment" type="button" data-view="recurrence">周期</button>
               <button class="segment" type="button" data-view="birthday">生日</button>
               <button class="segment" type="button" data-view="search">搜索</button>
             </div>
@@ -190,7 +198,7 @@
             </label>
             <label class="date-field birthday-year-field">
               <span>年份</span>
-              <input id="birthdayYear" type="number" min="1" max="9999" placeholder="可不填" />
+              <input id="birthdayYear" type="number" min="1" max="9999" />
             </label>
             <label class="select-field">
               <span>月份</span>
@@ -204,7 +212,7 @@
               <input id="birthdayLeap" type="checkbox" />
               <span>闰月</span>
             </label>
-            <input id="birthdayNote" type="text" maxlength="80" placeholder="备注，可不填" autocomplete="off" />
+            <input id="birthdayNote" type="text" maxlength="80" placeholder="备注" autocomplete="off" />
             <button class="primary-button" type="submit">添加</button>
           </form>
 
@@ -238,12 +246,11 @@
           <div class="task-meta"></div>
         </div>
         <div class="task-actions">
-          <button class="icon-button small" type="button" data-action="schedule" aria-label="安排到今天" title="安排到今天">◎</button>
           <button class="icon-button small" type="button" data-action="delete" aria-label="删除" title="删除">×</button>
         </div>
       </article>
     </template>
 
-    <script src="./app.js?v=50" type="module"></script>
+    <script src="./app.js?v=63" type="module"></script>
   </body>
 </html>

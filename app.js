@@ -2,8 +2,10 @@ import { englishWordBanks } from "./english-wordbanks.js";
 
 const storageKey = "workbuddy.tasks.v1";
 const birthdayStorageKey = "workbuddy.birthdays.v1";
+const recurrenceStorageKey = "workbuddy.recurrences.v1";
 const englishStorageKey = "workbuddy.english.v1";
 const knowledgeStorageKey = "workbuddy.knowledge.v1";
+const shoppingStorageKey = "workbuddy.shopping.v1";
 const legacyStorageKeys = ["daily-planner.tasks.v1"];
 const importBackupKey = "workbuddy.import-backup.v1";
 const legacyImportBackupKeys = ["daily-planner.import-backup.v1"];
@@ -11,13 +13,21 @@ const legacyImportBackupKeys = ["daily-planner.import-backup.v1"];
 const state = {
   tasks: loadTasks(),
   birthdays: loadBirthdays(),
+  recurrences: loadRecurrences(),
   english: loadEnglish(),
   knowledge: loadKnowledge(),
+  shopping: loadShopping(),
   module: "planner",
   selectedDate: toISODate(new Date()),
   view: "today",
   englishView: "today",
   knowledgeView: "categories",
+  shoppingCategoryId: "all",
+  shoppingSubcategoryId: "all",
+  shoppingSort: "custom",
+  shoppingSearch: "",
+  shoppingExpandedProductId: null,
+  shoppingHighlightedProductId: null,
   knowledgeSearch: "",
   knowledgeCategorySort: "custom",
   knowledgeDocumentSort: "custom",
@@ -46,12 +56,13 @@ const state = {
   },
   editing: null,
   birthdayEditing: null,
+  recurrenceEditing: null,
+  recurrenceSummaryRanges: {},
   expandedGoals: new Set(),
+  expandedRecurrences: new Set(),
+  expandedDetails: new Set(),
   collapsedSearchGoals: new Set(),
   expandedKnowledgeCategories: new Set(),
-  knowledgeDragging: null,
-  knowledgeDragTarget: null,
-  knowledgeDropAfter: false,
   knowledgeBatch: {
     active: false,
     trashActive: false,
@@ -63,6 +74,8 @@ const state = {
   },
   scheduleExpandedGroups: new Set(),
   dragging: null,
+  dragTarget: null,
+  dropAfter: false,
 };
 
 const elements = {
@@ -71,6 +84,7 @@ const elements = {
   todayCount: document.querySelector("#todayCount"),
   scheduleCount: document.querySelector("#scheduleCount"),
   mediumCount: document.querySelector("#mediumCount"),
+  recurrenceCount: document.querySelector("#recurrenceCount"),
   birthdayCount: document.querySelector("#birthdayCount"),
   doneCount: document.querySelector("#doneCount"),
   taskForm: document.querySelector("#taskForm"),
@@ -83,6 +97,7 @@ const elements = {
   emptyState: document.querySelector("#emptyState"),
   viewTitle: document.querySelector("#viewTitle"),
   viewMeta: document.querySelector("#viewMeta"),
+  toolbar: document.querySelector(".toolbar"),
   statusFilters: document.querySelector("#statusFilters"),
   statusFilterButtons: document.querySelectorAll(".status-filter"),
   searchPanel: document.querySelector("#searchPanel"),
@@ -131,8 +146,22 @@ const viewTitles = {
   today: "今天",
   schedule: "日程",
   medium: "中期",
+  recurrence: "周期",
   birthday: "生日",
   search: "搜索",
+};
+
+const recurrenceFrequencyLabels = {
+  daily: "每天",
+  weekly: "每周",
+  interval: "每隔",
+  monthly: "每月",
+};
+
+const recurrenceRecordLabels = {
+  done: "完成",
+  missed: "未完成",
+  skipped: "跳过",
 };
 
 const birthdayCalendarLabels = {
@@ -146,6 +175,7 @@ init();
 
 function init() {
   rolloverOpenScheduleTasks();
+  markMissedRecurrences();
   syncBirthdayReminders();
   elements.taskDate.value = state.selectedDate;
   elements.todayText.textContent = formatLongDate(new Date());
@@ -177,6 +207,8 @@ function bindEvents() {
             done: false,
             canceled: false,
             cancelReason: "",
+            note: "",
+            checklist: [],
             order: nextOrder(),
             createdAt: new Date().toISOString(),
             completedAt: null,
@@ -198,6 +230,9 @@ function bindEvents() {
       if (state.module === "planner") state.view = "today";
       if (state.module === "english") state.englishView = "today";
       if (state.module === "knowledge") state.knowledgeView = "categories";
+      if (state.module === "shopping") {
+        state.shoppingHighlightedProductId = null;
+      }
       render();
     });
   });
@@ -325,6 +360,7 @@ function renderModules() {
   elements.plannerSegments.hidden = !isPlanner;
   elements.englishSegments.hidden = !isEnglish;
   elements.knowledgeSegments.hidden = !isKnowledge;
+  elements.toolbar.hidden = state.module === "shopping";
 }
 
 function renderDateStrip() {
@@ -364,7 +400,8 @@ function renderKnowledgeSegments() {
 }
 
 function renderStatusFilters() {
-  const visible = state.module === "planner" && state.view !== "search" && state.view !== "birthday";
+  const visible =
+    state.module === "planner" && !["search", "birthday", "recurrence"].includes(state.view);
   elements.statusFilters.hidden = !visible;
   elements.statusFilterButtons.forEach((button) => {
     button.classList.toggle("is-active", button.dataset.statusFilter === currentStatusFilter());
@@ -440,6 +477,7 @@ function renderStats() {
   elements.todayCount.textContent = formatRatio(unitCompletionStats(todayEntries()));
   elements.scheduleCount.textContent = formatRatio(unitCompletionStats(scheduleEntries()));
   elements.mediumCount.textContent = formatRatio(goalCompletionStats(allMediumGoals()));
+  elements.recurrenceCount.textContent = state.recurrences.items.length;
   elements.birthdayCount.textContent = state.birthdays.length;
   elements.doneCount.textContent = totalCompletedUnits();
   renderEnglishStats();
@@ -457,12 +495,24 @@ function renderEnglishStats() {
 function renderList() {
   const entries = filteredEntries();
   elements.taskList.innerHTML = "";
-  elements.taskList.classList.toggle("is-medium-list", state.module === "planner" && (state.view === "medium" || state.view === "search"));
-  elements.taskList.classList.toggle("is-reorderable", canReorderCurrentView() || canReorderKnowledgeView());
+  elements.taskList.classList.toggle(
+    "is-medium-list",
+    state.module === "planner" && (state.view === "medium" || state.view === "search"),
+  );
+  elements.taskList.classList.toggle(
+    "is-reorderable",
+    canReorderCurrentView() || canReorderRecurrenceView() || canReorderKnowledgeView() || canReorderShoppingView(),
+  );
   elements.viewTitle.textContent = currentViewTitle();
   elements.viewMeta.textContent = currentViewMeta(entries);
+  const hasTodayRecurrences = state.module === "planner" && state.view === "today" && todayRecurrenceEntries().length > 0;
   elements.emptyState.hidden =
-    state.module === "english" || state.module === "knowledge" || state.view === "schedule" || entries.length > 0;
+    state.module === "english" ||
+    state.module === "knowledge" ||
+    state.module === "shopping" ||
+    state.view === "schedule" ||
+    hasTodayRecurrences ||
+    entries.length > 0;
 
   if (state.module === "english") {
     renderEnglishShell();
@@ -471,6 +521,11 @@ function renderList() {
 
   if (state.module === "knowledge") {
     renderKnowledgeShell();
+    return;
+  }
+
+  if (state.module === "shopping") {
+    renderShoppingShell();
     return;
   }
 
@@ -489,12 +544,18 @@ function renderList() {
     return;
   }
 
+  if (state.view === "recurrence") {
+    renderRecurrenceList(entries);
+    return;
+  }
+
   if (state.view === "schedule") {
     renderScheduleList(entries);
     return;
   }
 
   entries.forEach(renderTaskEntry);
+  if (state.view === "today") renderTodayRecurrences();
 }
 
 function renderEnglishShell() {
@@ -576,7 +637,7 @@ function createEnglishGroupsPanel() {
   const form = document.createElement("form");
   form.className = "english-group-form";
   form.innerHTML = `
-    <input name="title" type="text" maxlength="40" placeholder="组名，例如 adapt / adopt / adept" required />
+    <input name="title" type="text" maxlength="40" placeholder="组名" required />
     <label class="select-field">
       <span>类型</span>
       <select name="type" aria-label="词组类型">
@@ -589,7 +650,7 @@ function createEnglishGroupsPanel() {
       </select>
     </label>
     <input name="words" type="text" maxlength="120" placeholder="单词，用逗号分隔" required />
-    <input name="note" type="text" maxlength="120" placeholder="备注，可不填" />
+    <input name="note" type="text" maxlength="120" placeholder="备注" />
     <button class="primary-button" type="submit">添加</button>
   `;
   form.addEventListener("submit", (event) => {
@@ -758,7 +819,7 @@ function createWordCard(word, bank, options = {}) {
     <div class="english-word-example">${escapeHtml(word.example)}</div>
     ${word.exampleCn ? `<div class="english-word-example-cn">例句中文：${escapeHtml(word.exampleCn)}</div>` : ""}
     <div class="english-review-count">复习：${progress.knownCount || 0}/${progress.reviewCount || 0}</div>
-    <textarea class="english-note-input" maxlength="180" placeholder="我的备注，可不填">${escapeHtml(progress.note || "")}</textarea>
+    <textarea class="english-note-input" maxlength="180" placeholder="我的备注">${escapeHtml(progress.note || "")}</textarea>
     <div class="english-word-actions">
       <button class="save-button" type="button" data-action="save-note">保存备注</button>
       <button class="save-button" type="button" data-action="learned">${progress.learnedAt ? "已学过" : "认识了"}</button>
@@ -822,6 +883,416 @@ function createEnglishEmptyCard(text) {
   return card;
 }
 
+function renderShoppingShell() {
+  const shell = document.createElement("div");
+  shell.className = "shopping-shell";
+  shell.append(createShoppingPanel());
+  elements.taskList.append(shell);
+}
+
+function createShoppingPanel() {
+  const panel = document.createElement("section");
+  panel.className = "shopping-panel";
+  panel.append(createShoppingCategoryTabs());
+  panel.append(createShoppingSubcategoryTabs());
+  panel.append(createShoppingControls());
+  panel.append(createShoppingProductForm());
+
+  const products = shoppingVisibleProducts();
+  if (state.shoppingSearch) {
+    panel.append(createShoppingSearchResults(products));
+    return panel;
+  }
+
+  if (!products.length) {
+    panel.append(createShoppingEmptyCard("这里暂时没有商品。先新建分类，再添加商品。"));
+    return panel;
+  }
+
+  const list = document.createElement("div");
+  list.className = "shopping-product-list";
+  products.forEach((product) => list.append(createShoppingProductCard(product)));
+  panel.append(list);
+  return panel;
+}
+
+function createShoppingCategoryTabs() {
+  const section = document.createElement("div");
+  section.className = "shopping-category-bar";
+  const tabs = document.createElement("div");
+  tabs.className = "shopping-tabs";
+  tabs.append(createShoppingTab(shoppingTabLabel("全部", state.shopping.products.length), state.shoppingCategoryId === "all", () => {
+    state.shoppingCategoryId = "all";
+    state.shoppingSubcategoryId = "all";
+    state.shoppingHighlightedProductId = null;
+    render();
+  }));
+  sortedShoppingCategories().forEach((category) => {
+    tabs.append(createShoppingTab(shoppingTabLabel(category.name, shoppingCategoryProductCount(category.id)), state.shoppingCategoryId === category.id, () => {
+      state.shoppingCategoryId = category.id;
+      state.shoppingSubcategoryId = "all";
+      state.shoppingHighlightedProductId = null;
+      render();
+    }, {
+      sortKey: { kind: "shopping-category", id: category.id },
+      onRename: () => renameShoppingCategory(category.id),
+      onDelete: () => deleteShoppingCategory(category.id),
+    }));
+  });
+  section.append(tabs, createShoppingCategoryForm());
+  return section;
+}
+
+function createShoppingSubcategoryTabs() {
+  const section = document.createElement("div");
+  section.className = "shopping-category-bar shopping-subcategory-bar";
+  if (state.shoppingCategoryId === "all") {
+    const note = document.createElement("div");
+    note.className = "shopping-inline-note";
+    note.textContent = "选择一级分类后，可以管理它下面的二级分类。";
+    section.append(note);
+    return section;
+  }
+
+  const tabs = document.createElement("div");
+  tabs.className = "shopping-tabs";
+  tabs.append(createShoppingTab(shoppingTabLabel("全部", shoppingCategoryProductCount(state.shoppingCategoryId)), state.shoppingSubcategoryId === "all", () => {
+    state.shoppingSubcategoryId = "all";
+    state.shoppingHighlightedProductId = null;
+    render();
+  }));
+  shoppingSubcategoriesFor(state.shoppingCategoryId).forEach((subcategory) => {
+    tabs.append(createShoppingTab(shoppingTabLabel(subcategory.name, shoppingSubcategoryProductCount(subcategory.id)), state.shoppingSubcategoryId === subcategory.id, () => {
+      state.shoppingSubcategoryId = subcategory.id;
+      state.shoppingHighlightedProductId = null;
+      render();
+    }, {
+      sortKey: { kind: "shopping-subcategory", categoryId: state.shoppingCategoryId, id: subcategory.id },
+      onRename: () => renameShoppingSubcategory(subcategory.id),
+      onDelete: () => deleteShoppingSubcategory(subcategory.id),
+    }));
+  });
+  section.append(tabs, createShoppingSubcategoryForm(state.shoppingCategoryId));
+  return section;
+}
+
+function createShoppingTab(label, active, onClick, actions = {}) {
+  const wrap = document.createElement("div");
+  wrap.className = `shopping-tab-wrap${active ? " is-active" : ""}`;
+  const button = document.createElement("button");
+  button.className = "shopping-tab";
+  button.type = "button";
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  wrap.append(button);
+  if (actions.sortKey) {
+    setupShoppingTabSortable(wrap, button, actions.sortKey);
+  }
+  if (actions.onRename || actions.onDelete) {
+    const actionWrap = document.createElement("div");
+    actionWrap.className = "shopping-tab-actions";
+    if (actions.onRename) {
+      const rename = document.createElement("button");
+      rename.type = "button";
+      rename.title = "重命名";
+      rename.setAttribute("aria-label", "重命名");
+      rename.textContent = "✎";
+      rename.addEventListener("click", actions.onRename);
+      actionWrap.append(rename);
+    }
+    if (actions.onDelete) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.title = "删除";
+      remove.setAttribute("aria-label", "删除");
+      remove.textContent = "×";
+      remove.addEventListener("click", actions.onDelete);
+      actionWrap.append(remove);
+    }
+    wrap.append(actionWrap);
+  }
+  return wrap;
+}
+
+function createShoppingCategoryForm() {
+  const form = document.createElement("form");
+  form.className = "shopping-inline-form";
+  form.innerHTML = `
+    <input name="name" type="text" maxlength="30" placeholder="新建一级分类" />
+    <button class="save-button" type="submit">添加</button>
+  `;
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const name = form.elements.name.value.trim();
+    if (!name) return;
+    addShoppingCategory(name);
+  });
+  return form;
+}
+
+function createShoppingSubcategoryForm(categoryId) {
+  const form = document.createElement("form");
+  form.className = "shopping-inline-form";
+  form.innerHTML = `
+    <input name="name" type="text" maxlength="30" placeholder="新建二级分类" />
+    <button class="save-button" type="submit">添加</button>
+  `;
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const name = form.elements.name.value.trim();
+    if (!name) return;
+    addShoppingSubcategory(categoryId, name);
+  });
+  return form;
+}
+
+function createShoppingControls() {
+  const controls = document.createElement("div");
+  controls.className = "shopping-controls";
+  controls.innerHTML = `
+    <input type="search" placeholder="搜索商品、平台或备注" value="${escapeHtml(state.shoppingSearch)}" />
+    <label class="select-field">
+      <span>排序</span>
+      <select aria-label="商品排序">
+        <option value="custom"${state.shoppingSort === "custom" ? " selected" : ""}>手动</option>
+        <option value="name"${state.shoppingSort === "name" ? " selected" : ""}>名称顺序</option>
+      </select>
+    </label>
+  `;
+  controls.querySelector('input[type="search"]').addEventListener("input", (event) => {
+    state.shoppingSearch = event.target.value.trim();
+    state.shoppingHighlightedProductId = null;
+    renderList();
+  });
+  controls.querySelector("select").addEventListener("change", (event) => {
+    state.shoppingSort = event.target.value;
+    render();
+  });
+  return controls;
+}
+
+function createShoppingProductForm() {
+  const form = document.createElement("form");
+  form.className = "shopping-product-form";
+  const categories = sortedShoppingCategories();
+  if (!categories.length) {
+    form.innerHTML = `<div class="shopping-inline-note">先新建一级分类，再添加商品。</div>`;
+    return form;
+  }
+
+  const selectedCategoryId = state.shoppingCategoryId !== "all" ? state.shoppingCategoryId : categories[0].id;
+  form.innerHTML = `
+    <input name="name" type="text" maxlength="80" placeholder="添加商品" required />
+    <label class="select-field">
+      <span>一级</span>
+      <select name="categoryId" aria-label="一级分类">
+        ${categories
+          .map((category) => `<option value="${escapeHtml(category.id)}"${category.id === selectedCategoryId ? " selected" : ""}>${escapeHtml(category.name)}</option>`)
+          .join("")}
+      </select>
+    </label>
+    <label class="select-field">
+      <span>二级</span>
+      <select name="subcategoryId" aria-label="二级分类"></select>
+    </label>
+    <input name="unit" type="text" maxlength="16" placeholder="数量单位" />
+    <button class="primary-button" type="submit">添加商品</button>
+  `;
+  const categorySelect = form.elements.categoryId;
+  const subcategorySelect = form.elements.subcategoryId;
+  const renderSubcategoryOptions = () => {
+    const subcategories = shoppingSubcategoriesFor(categorySelect.value);
+    subcategorySelect.innerHTML = `<option value="">不选</option>${subcategories
+      .map((subcategory) => `<option value="${escapeHtml(subcategory.id)}">${escapeHtml(subcategory.name)}</option>`)
+      .join("")}`;
+    if (state.shoppingSubcategoryId !== "all" && subcategories.some((item) => item.id === state.shoppingSubcategoryId)) {
+      subcategorySelect.value = state.shoppingSubcategoryId;
+    }
+  };
+  categorySelect.addEventListener("change", renderSubcategoryOptions);
+  renderSubcategoryOptions();
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const name = form.elements.name.value.trim();
+    if (!name) return;
+    addShoppingProduct({
+      name,
+      categoryId: form.elements.categoryId.value,
+      subcategoryId: form.elements.subcategoryId.value || null,
+      unit: form.elements.unit.value.trim(),
+    });
+  });
+  return form;
+}
+
+function createShoppingSearchResults(products) {
+  const section = document.createElement("div");
+  section.className = "shopping-search-results";
+  const heading = document.createElement("div");
+  heading.className = "shopping-subheading";
+  heading.textContent = `搜索结果 ${products.length}`;
+  section.append(heading);
+  if (!products.length) {
+    section.append(createShoppingEmptyCard("没有找到匹配商品。"));
+    return section;
+  }
+  products.forEach((product) => section.append(createShoppingSearchRow(product)));
+  return section;
+}
+
+function createShoppingSearchRow(product) {
+  const row = document.createElement("button");
+  row.className = "shopping-search-row";
+  row.type = "button";
+  row.innerHTML = `
+    <strong>${escapeHtml(product.name)}</strong>
+    <span>${escapeHtml(shoppingProductPath(product))}</span>
+    <span>${escapeHtml(shoppingBestPriceText(product))}</span>
+  `;
+  row.addEventListener("click", () => {
+    state.shoppingCategoryId = product.categoryId;
+    state.shoppingSubcategoryId = product.subcategoryId || "all";
+    state.shoppingExpandedProductId = product.id;
+    state.shoppingHighlightedProductId = product.id;
+    state.shoppingSearch = "";
+    render();
+  });
+  return row;
+}
+
+function createShoppingProductCard(product) {
+  const expanded = state.shoppingExpandedProductId === product.id;
+  const highlighted = state.shoppingHighlightedProductId === product.id;
+  const card = document.createElement("article");
+  card.className = `shopping-product-card${expanded ? " is-expanded" : ""}${highlighted ? " is-highlighted" : ""}`;
+  card.innerHTML = `
+    <div class="shopping-product-head">
+      <div class="task-body">
+        <h3>${escapeHtml(product.name)}</h3>
+        <div class="task-meta">${escapeHtml(shoppingBestPriceText(product))}</div>
+      </div>
+      <div class="task-actions">
+        ${state.shoppingSort === "custom" && !state.shoppingSearch ? dragHandleHtml() : ""}
+        <button class="icon-button small expand-button${expanded ? " is-expanded" : ""}" type="button" data-action="expand" title="${expanded ? "收起" : "展开"}" aria-label="${expanded ? "收起" : "展开"}">▸</button>
+        <button class="icon-button small" type="button" data-action="rename" title="修改商品名" aria-label="修改商品名">✎</button>
+        <button class="icon-button small" type="button" data-action="delete" title="删除商品" aria-label="删除商品">×</button>
+      </div>
+    </div>
+  `;
+  card.querySelector('[data-action="expand"]').addEventListener("click", () => {
+    state.shoppingExpandedProductId = expanded ? null : product.id;
+    state.shoppingHighlightedProductId = null;
+    render();
+  });
+  card.querySelector('[data-action="rename"]').addEventListener("click", () => renameShoppingProduct(product.id));
+  card.querySelector('[data-action="delete"]').addEventListener("click", () => deleteShoppingProduct(product.id));
+  setupShoppingProductSortable(card, product.id);
+
+  if (expanded) {
+    card.append(createShoppingProductDetail(product));
+  }
+  return card;
+}
+
+function createShoppingProductDetail(product) {
+  const detail = document.createElement("div");
+  detail.className = "shopping-product-detail";
+  detail.append(createShoppingUnitForm(product));
+  detail.append(createShoppingRecordForm(product));
+  detail.append(createShoppingRecordList(product));
+  return detail;
+}
+
+function createShoppingUnitForm(product) {
+  const form = document.createElement("form");
+  form.className = "shopping-unit-form";
+  form.innerHTML = `
+    <label class="date-field">
+      <span>数量单位</span>
+      <input name="unit" type="text" maxlength="16" value="${escapeHtml(product.unit)}" />
+    </label>
+    <button class="save-button" type="submit">保存单位</button>
+  `;
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    updateShoppingProduct(product.id, { unit: form.elements.unit.value.trim() });
+  });
+  return form;
+}
+
+function createShoppingRecordForm(product) {
+  const form = document.createElement("form");
+  form.className = "shopping-record-form";
+  form.innerHTML = `
+    <input name="date" type="date" value="${state.selectedDate}" required />
+    <input name="platform" type="text" maxlength="40" placeholder="平台" required />
+    <label class="date-field">
+      <span>总价</span>
+      <input name="totalPrice" type="number" min="0" step="0.01" required />
+    </label>
+    <label class="date-field">
+      <span>数量</span>
+      <input name="quantity" type="number" min="0" step="0.01" required />
+    </label>
+    <input name="note" type="text" maxlength="80" placeholder="备注" />
+    <button class="primary-button" type="submit">添加记录</button>
+  `;
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const totalPrice = normalizeMoneyInput(form.elements.totalPrice.value);
+    const quantity = normalizeMoneyInput(form.elements.quantity.value);
+    const platform = form.elements.platform.value.trim();
+    if (!platform || totalPrice === null || quantity === null || quantity <= 0) return;
+    addShoppingRecord(product.id, {
+      date: form.elements.date.value || state.selectedDate,
+      platform,
+      totalPrice,
+      quantity,
+      note: form.elements.note.value.trim(),
+    });
+  });
+  return form;
+}
+
+function createShoppingRecordList(product) {
+  const list = document.createElement("div");
+  list.className = "shopping-record-list";
+  if (!product.records.length) {
+    list.append(createShoppingEmptyCard("还没有购买记录。"));
+    return list;
+  }
+  sortedShoppingRecords(product).forEach((record) => list.append(createShoppingRecordRow(product, record)));
+  return list;
+}
+
+function createShoppingRecordRow(product, record) {
+  const row = document.createElement("div");
+  row.className = "shopping-record-row";
+  const unitPrice = shoppingUnitPrice(record);
+  const unit = product.unit ? ` ${escapeHtml(product.unit)}` : "";
+  row.innerHTML = `
+    <div>
+      <strong>${escapeHtml(formatTaskDate(record.date))} · ${escapeHtml(record.platform)}</strong>
+      <span>总价 ${formatMoney(record.totalPrice)} 元 · 数量 ${formatQuantity(record.quantity)}${unit} · 单价 ${formatUnitPrice(unitPrice)} 元${product.unit ? `/${escapeHtml(product.unit)}` : ""}</span>
+      ${record.note ? `<span>${escapeHtml(record.note)}</span>` : ""}
+    </div>
+    <div class="task-actions">
+      <button class="icon-button small" type="button" data-action="edit" title="修改记录" aria-label="修改记录">✎</button>
+      <button class="icon-button small" type="button" data-action="delete" title="删除记录" aria-label="删除记录">×</button>
+    </div>
+  `;
+  row.querySelector('[data-action="edit"]').addEventListener("click", () => editShoppingRecord(product.id, record.id));
+  row.querySelector('[data-action="delete"]').addEventListener("click", () => deleteShoppingRecord(product.id, record.id));
+  return row;
+}
+
+function createShoppingEmptyCard(text) {
+  const card = document.createElement("div");
+  card.className = "shopping-empty-card";
+  card.textContent = text;
+  return card;
+}
+
 function renderKnowledgeShell() {
   const shell = document.createElement("div");
   shell.className = "knowledge-shell";
@@ -852,14 +1323,14 @@ function createKnowledgeCategoriesPanel() {
       <span>分类排序</span>
       <select data-sort="category" aria-label="分类排序">
         <option value="custom"${state.knowledgeCategorySort === "custom" ? " selected" : ""}>手动</option>
-        <option value="az"${state.knowledgeCategorySort === "az" ? " selected" : ""}>首字母</option>
+        <option value="az"${state.knowledgeCategorySort === "az" ? " selected" : ""}>名称顺序</option>
       </select>
     </label>
     <label class="select-field">
       <span>文档排序</span>
       <select data-sort="document" aria-label="文档排序">
         <option value="custom"${state.knowledgeDocumentSort === "custom" ? " selected" : ""}>手动</option>
-        <option value="az"${state.knowledgeDocumentSort === "az" ? " selected" : ""}>首字母</option>
+        <option value="az"${state.knowledgeDocumentSort === "az" ? " selected" : ""}>名称顺序</option>
         <option value="updatedAt"${state.knowledgeDocumentSort === "updatedAt" ? " selected" : ""}>修改日期</option>
       </select>
     </label>
@@ -968,7 +1439,7 @@ function createKnowledgeCategoryCard(category) {
       <div class="knowledge-actions">
         ${
           !state.knowledgeBatch.active && state.knowledgeCategorySort === "custom"
-            ? '<button class="icon-button small drag-handle" type="button" data-drag-handle title="拖动排序" aria-label="拖动排序">☰</button>'
+            ? dragHandleHtml()
             : ""
         }
         ${state.knowledgeBatch.active ? "" : '<button class="icon-button small" type="button" data-action="new-doc" title="新建文档" aria-label="新建文档">＋</button>'}
@@ -1013,10 +1484,10 @@ function createKnowledgeDocumentRow(doc, categoryId = null, options = {}) {
         doc.updatedAt || doc.createdAt,
       )}</span>
     </button>
-    <div class="knowledge-actions">
-      ${
+      <div class="knowledge-actions">
+       ${
         !state.knowledgeBatch.active && categoryId && state.knowledgeDocumentSort === "custom"
-          ? '<button class="icon-button small drag-handle" type="button" data-drag-handle title="拖动排序" aria-label="拖动排序">☰</button>'
+          ? dragHandleHtml()
           : ""
       }
       ${state.knowledgeBatch.active ? "" : '<button class="icon-button small" type="button" data-action="rename" title="重命名" aria-label="重命名">✎</button>'}
@@ -2033,15 +2504,24 @@ function renderMarkdownPreview(content) {
     if (/^\s*([-*+])\s+/.test(line) || /^\s*\d+\.\s+/.test(line)) {
       const ordered = /^\s*\d+\.\s+/.test(line);
       const items = [];
-      while (
-        index < lines.length &&
-        (ordered ? /^\s*\d+\.\s+/.test(lines[index]) : /^\s*[-*+]\s+/.test(lines[index]))
-      ) {
-        items.push(lines[index].replace(ordered ? /^\s*\d+\.\s+/ : /^\s*[-*+]\s+/, ""));
+      const markerPattern = ordered ? /^\s*(\d+)\.\s+(.+)$/ : /^\s*[-*+]\s+(.+)$/;
+      while (index < lines.length) {
+        const match = lines[index].match(markerPattern);
+        if (!match) break;
+        items.push({
+          number: ordered ? Number(match[1]) : null,
+          text: ordered ? match[2] : match[1],
+        });
         index += 1;
+        const blankStart = index;
+        while (index < lines.length && !lines[index].trim()) index += 1;
+        if (index >= lines.length || !markerPattern.test(lines[index])) {
+          index = blankStart;
+          break;
+        }
       }
       const tag = ordered ? "ol" : "ul";
-      blocks.push(`<${tag}>${items.map((item) => `<li>${renderMarkdownInline(item)}</li>`).join("")}</${tag}>`);
+      blocks.push(`<${tag}>${items.map((item) => `<li${ordered ? ` value="${item.number}"` : ""}>${renderMarkdownInline(item.text)}</li>`).join("")}</${tag}>`);
       continue;
     }
 
@@ -2339,26 +2819,29 @@ function renderTaskEntry(entry) {
   const title = node.querySelector("h3");
   const pill = node.querySelector(".priority-pill");
   const meta = node.querySelector(".task-meta");
-  const schedule = node.querySelector('[data-action="schedule"]');
   const remove = node.querySelector('[data-action="delete"]');
   const actions = node.querySelector(".task-actions");
+  const detailTarget = entryDetailTarget(entry);
 
   node.classList.toggle("is-done", entry.done);
   node.classList.toggle("is-canceled", isCanceled(entry));
   node.classList.add(`priority-${entry.priority}`);
-  setupDraggableElement(node, entry);
   check.classList.toggle("is-checked", entry.done);
   check.disabled = isCanceled(entry);
   title.textContent = entry.title;
   pill.textContent = priorityLabels[entry.priority] || priorityLabels.normal;
   pill.classList.add(entry.priority || "normal");
   meta.innerHTML = entryMetaHtml(entry);
-  schedule.hidden = entry.done || isCanceled(entry) || entry.date === state.selectedDate;
+  appendDetailBlock(node.querySelector(".task-body"), detailTarget, entry);
 
-  actions.prepend(createEditButton(entry));
-  actions.prepend(createCancelButton(entry));
+  actions.replaceChildren();
+  const dragHandle = createPlannerDragHandle(node, entry);
+  if (dragHandle) actions.append(dragHandle);
+  actions.append(createDetailButton(detailTarget, entry));
+  actions.append(createEditButton(entry));
+  actions.append(createCancelButton(entry));
+  actions.append(remove);
   check.addEventListener("click", () => toggleEntryDone(entry));
-  schedule.addEventListener("click", () => scheduleEntryToday(entry));
   remove.addEventListener("click", () => deleteEntry(entry));
   elements.taskList.appendChild(node);
 }
@@ -2454,6 +2937,378 @@ function scheduleGroupMeta(entries) {
   return `${formatRatio(stats)} 已完成${canceled ? ` · ${canceled} 已取消` : ""}`;
 }
 
+function renderTodayRecurrences() {
+  const entries = todayRecurrenceEntries();
+  if (!entries.length) return;
+
+  const section = document.createElement("section");
+  section.className = "recurrence-today-section";
+  const heading = document.createElement("div");
+  heading.className = "recurrence-section-heading";
+  heading.innerHTML = `<h3>周期任务</h3><span>${recurrenceTodayMeta(entries)}</span>`;
+  section.append(heading);
+
+  const list = document.createElement("div");
+  list.className = "recurrence-today-list";
+  entries.forEach((item) => list.append(createTodayRecurrenceCard(item)));
+  section.append(list);
+  elements.taskList.append(section);
+}
+
+function createTodayRecurrenceCard(item) {
+  const record = recurrenceRecordFor(item, state.selectedDate);
+  const status = record?.status || "open";
+  const detailTarget = recurrenceDetailTarget(item);
+  const card = document.createElement("article");
+  card.className = `recurrence-today-card is-${status} priority-${item.priority}`;
+  card.innerHTML = `
+    <div class="recurrence-today-main">
+      <button class="check-button${status === "done" ? " is-checked" : ""}" type="button" aria-label="标记周期完成"></button>
+      <div class="task-body">
+        <div class="recurrence-title-row">
+          <h3>${escapeHtml(item.title)}</h3>
+          <span class="priority-pill ${item.priority}">${priorityLabels[item.priority]}</span>
+        </div>
+        <div class="task-meta">${escapeHtml(recurrenceFrequencyText(item))} · ${recurrenceStatusText(item, state.selectedDate)}</div>
+      </div>
+    </div>
+    <div class="task-actions">
+      <button class="icon-button small detail-toggle-button${hasDetailContent(item) ? " has-detail" : ""}" type="button" data-action="details" aria-label="备注" title="备注">备</button>
+      <button class="save-button" type="button" data-action="done">${status === "done" ? "已完成" : "完成"}</button>
+      <button class="cancel-button" type="button" data-action="skipped">${status === "skipped" ? "已跳过" : "跳过"}</button>
+    </div>
+  `;
+  appendDetailBlock(card.querySelector(".task-body"), detailTarget, item);
+  card.querySelector('[data-action="details"]').classList.toggle("is-active", isDetailExpanded(detailTarget));
+  card.querySelector('[data-action="details"]').addEventListener("click", () => toggleDetailExpanded(detailTarget));
+  card.querySelector('[data-action="done"]').addEventListener("click", () => toggleTodayRecurrenceDone(item.id));
+  card.querySelector(".check-button").addEventListener("click", () => toggleTodayRecurrenceDone(item.id));
+  card
+    .querySelector('[data-action="skipped"]')
+    .addEventListener("click", () => toggleTodayRecurrenceSkipped(item.id));
+  return card;
+}
+
+function renderRecurrenceList(entries) {
+  const panel = document.createElement("section");
+  panel.className = "recurrence-panel";
+  panel.append(createRecurrenceForm());
+
+  if (!entries.length) {
+    panel.append(createRecurrenceEmptyCard());
+    elements.taskList.append(panel);
+    return;
+  }
+
+  const list = document.createElement("div");
+  list.className = "recurrence-list";
+  entries.forEach((item) => {
+    list.append(state.recurrenceEditing === item.id ? createRecurrenceEditor(item) : createRecurrenceCard(item));
+  });
+  panel.append(list);
+  elements.taskList.append(panel);
+}
+
+function createRecurrenceForm() {
+  const form = document.createElement("form");
+  form.className = "recurrence-form";
+  form.innerHTML = `
+    <input name="title" type="text" maxlength="80" placeholder="添加周期任务" autocomplete="off" required />
+    ${recurrenceFrequencyFieldsHtml({ type: "daily", weekday: isoWeekday(parseISODate(state.selectedDate)), everyDays: 2, monthDay: parseISODate(state.selectedDate).getDate() })}
+    <label class="date-field">
+      <span>开始</span>
+      <input name="startDate" type="date" value="${state.selectedDate}" />
+    </label>
+    <label class="select-field priority-select priority-normal">
+      <span>重要性</span>
+      <select name="priority" aria-label="周期重要性">
+        ${priorityOptionsHtml("normal")}
+      </select>
+    </label>
+    <button class="primary-button" type="submit">添加周期</button>
+  `;
+  bindRecurrenceFrequencyFields(form);
+  bindRecurrencePriorityField(form);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const title = form.elements.title.value.trim();
+    if (!title) return;
+    addRecurrence({
+      title,
+      frequency: readRecurrenceFrequency(form),
+      startDate: form.elements.startDate.value || state.selectedDate,
+      priority: form.elements.priority.value,
+    });
+  });
+  return form;
+}
+
+function createRecurrenceRangeControls(item, range) {
+  const controls = document.createElement("div");
+  controls.className = "recurrence-summary-controls";
+  controls.innerHTML = `
+    <label class="date-field">
+      <span>开始</span>
+      <input type="date" data-range="start" value="${range.start}" />
+    </label>
+    <label class="date-field">
+      <span>结束</span>
+      <input type="date" data-range="end" value="${range.end}" />
+    </label>
+    <button class="cancel-button" type="button" data-action="all-range">全部</button>
+  `;
+  controls.querySelector('[data-range="start"]').addEventListener("change", (event) => {
+    setRecurrenceSummaryRange(item.id, { start: event.target.value });
+    render();
+  });
+  controls.querySelector('[data-range="end"]').addEventListener("change", (event) => {
+    setRecurrenceSummaryRange(item.id, { end: event.target.value });
+    render();
+  });
+  controls.querySelector('[data-action="all-range"]').addEventListener("click", () => {
+    delete state.recurrenceSummaryRanges[item.id];
+    render();
+  });
+  return controls;
+}
+
+function createRecurrenceCard(item) {
+  const expanded = state.expandedRecurrences.has(item.id);
+  const range = expanded ? recurrenceRangeFor(item) : defaultRecurrenceSummaryRange(item);
+  const stats = recurrencePeriodStats(item, range.start, range.end);
+  const detailTarget = recurrenceDetailTarget(item);
+  const card = document.createElement("article");
+  card.className = `recurrence-card priority-${item.priority}${item.active ? "" : " is-inactive"}`;
+  card.innerHTML = `
+    <div class="recurrence-card-head">
+      <div class="task-body">
+        <div class="recurrence-title-row">
+          <h3>${escapeHtml(item.title)}</h3>
+          <span class="priority-pill ${item.priority}">${priorityLabels[item.priority]}</span>
+          ${item.active ? "" : '<span class="recurrence-state-pill">已停用</span>'}
+        </div>
+        <div class="task-meta">${escapeHtml(recurrenceFrequencyText(item))} · 开始：${formatTaskDate(item.startDate)}${
+          item.endDate ? ` · 停用：${formatTaskDate(item.endDate)}` : ""
+        }</div>
+      </div>
+      <div class="task-actions">
+        ${dragHandleHtml()}
+        <button class="icon-button small detail-toggle-button${isDetailExpanded(detailTarget) ? " is-active" : ""}${hasDetailContent(item) ? " has-detail" : ""}" type="button" data-action="details" aria-label="备注" title="备注">备</button>
+        <button class="icon-button small expand-button${expanded ? " is-expanded" : ""}" type="button" data-action="expand" aria-label="${expanded ? "收起日历" : "展开日历"}" title="${expanded ? "收起日历" : "展开日历"}">▸</button>
+        <button class="icon-button small" type="button" data-action="edit" aria-label="修改周期" title="修改周期">✎</button>
+        <button class="icon-button small" type="button" data-action="toggle" aria-label="${item.active ? "停用周期" : "启用周期"}" title="${item.active ? "停用周期" : "启用周期"}">${item.active ? "Ⅱ" : "▶"}</button>
+        <button class="icon-button small" type="button" data-action="delete" aria-label="删除周期" title="删除周期">×</button>
+      </div>
+    </div>
+    <div class="recurrence-stats">
+      <span>应做 ${stats.due}</span>
+      <span>完成 ${stats.done}</span>
+      <span>未完成 ${stats.missed}</span>
+      <span>跳过 ${stats.skipped}</span>
+      <span>完成率 ${stats.rate}%</span>
+      <span>最长连续 ${stats.longestStreak}</span>
+      <span>当前连续 ${stats.currentStreak}</span>
+    </div>
+  `;
+  appendDetailBlock(card.querySelector(".task-body"), detailTarget, item);
+  setupRecurrenceSortable(card, item.id);
+  if (expanded) {
+    card.append(createRecurrenceRangeControls(item, range));
+    card.append(createRecurrenceCalendarRange(item, range));
+  }
+  card.querySelector('[data-action="details"]').addEventListener("click", () => toggleDetailExpanded(detailTarget));
+  card.querySelector('[data-action="expand"]').addEventListener("click", () => toggleRecurrenceExpanded(item.id));
+  card.querySelector('[data-action="edit"]').addEventListener("click", () => {
+    state.recurrenceEditing = item.id;
+    render();
+  });
+  card.querySelector('[data-action="toggle"]').addEventListener("click", () => toggleRecurrenceActive(item.id));
+  card.querySelector('[data-action="delete"]').addEventListener("click", () => deleteRecurrence(item.id));
+  return card;
+}
+
+function createRecurrenceEditor(item) {
+  const wrapper = document.createElement("article");
+  wrapper.className = `recurrence-card recurrence-edit-card priority-${item.priority}`;
+  wrapper.innerHTML = `
+    <form class="recurrence-form">
+      <input name="title" type="text" maxlength="80" value="${escapeHtml(item.title)}" aria-label="周期标题" required />
+      ${recurrenceFrequencyFieldsHtml(item.frequency)}
+      <label class="date-field">
+        <span>开始</span>
+        <input name="startDate" type="date" value="${item.startDate}" />
+      </label>
+      <label class="select-field priority-select priority-${item.priority}">
+        <span>重要性</span>
+        <select name="priority" aria-label="周期重要性">
+          ${priorityOptionsHtml(item.priority)}
+        </select>
+      </label>
+      <div class="edit-actions">
+        <button class="save-button" type="submit">保存</button>
+        <button class="cancel-button" type="button">取消</button>
+      </div>
+    </form>
+  `;
+  const form = wrapper.querySelector("form");
+  bindRecurrenceFrequencyFields(form);
+  bindRecurrencePriorityField(form);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const title = form.elements.title.value.trim();
+    if (!title) return;
+    updateRecurrence(item.id, {
+      title,
+      frequency: readRecurrenceFrequency(form),
+      startDate: form.elements.startDate.value || state.selectedDate,
+      priority: form.elements.priority.value,
+    });
+  });
+  wrapper.querySelector(".cancel-button").addEventListener("click", () => {
+    state.recurrenceEditing = null;
+    render();
+  });
+  return wrapper;
+}
+
+function recurrenceFrequencyFieldsHtml(frequency) {
+  const normalized = normalizeRecurrenceFrequency(frequency);
+  return `
+    <label class="select-field recurrence-frequency-type">
+      <span>频率</span>
+      <select name="frequencyType" aria-label="周期频率">
+        <option value="daily"${normalized.type === "daily" ? " selected" : ""}>每天</option>
+        <option value="weekly"${normalized.type === "weekly" ? " selected" : ""}>每周</option>
+        <option value="interval"${normalized.type === "interval" ? " selected" : ""}>每隔 N 天</option>
+        <option value="monthly"${normalized.type === "monthly" ? " selected" : ""}>每月</option>
+      </select>
+    </label>
+    <label class="select-field recurrence-extra recurrence-weekly">
+      <span>周几</span>
+      <select name="weekday" aria-label="每周日期">
+        ${[1, 2, 3, 4, 5, 6, 7]
+          .map((day) => `<option value="${day}"${normalized.weekday === day ? " selected" : ""}>周${"一二三四五六日"[day - 1]}</option>`)
+          .join("")}
+      </select>
+    </label>
+    <label class="select-field recurrence-extra recurrence-interval">
+      <span>间隔</span>
+      <select name="everyDays" aria-label="间隔天数">
+        ${[2, 3, 4, 5, 6, 7, 10, 14, 30]
+          .map((day) => `<option value="${day}"${normalized.everyDays === day ? " selected" : ""}>${day} 天</option>`)
+          .join("")}
+      </select>
+    </label>
+    <label class="select-field recurrence-extra recurrence-monthly">
+      <span>日期</span>
+      <select name="monthDay" aria-label="每月日期">
+        ${Array.from({ length: 31 }, (_, index) => index + 1)
+          .map((day) => `<option value="${day}"${normalized.monthDay === day ? " selected" : ""}>${day} 日</option>`)
+          .join("")}
+      </select>
+    </label>
+  `;
+}
+
+function bindRecurrenceFrequencyFields(form) {
+  const type = form.elements.frequencyType;
+  const update = () => {
+    const value = type.value;
+    form.querySelector(".recurrence-weekly").hidden = value !== "weekly";
+    form.querySelector(".recurrence-interval").hidden = value !== "interval";
+    form.querySelector(".recurrence-monthly").hidden = value !== "monthly";
+  };
+  type.addEventListener("change", update);
+  update();
+}
+
+function bindRecurrencePriorityField(form) {
+  const select = form.elements.priority;
+  const field = select.closest(".priority-select");
+  select.addEventListener("change", () => {
+    field.classList.remove("priority-normal", "priority-high", "priority-urgent");
+    field.classList.add(`priority-${select.value}`);
+  });
+}
+
+function createRecurrenceCalendarRange(item, range) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "recurrence-calendar-range";
+  let monthStart = startOfMonth(parseISODate(range.start));
+  const rangeEnd = parseISODate(range.end);
+  const monthCount = monthsBetween(monthStart, startOfMonth(rangeEnd)) + 1;
+  if (monthCount > 12) {
+    const note = document.createElement("div");
+    note.className = "recurrence-calendar-note";
+    note.textContent = "所选时间较长，日历只显示最后 12 个月；上方计数仍按完整时间段统计。";
+    wrapper.append(note);
+    monthStart = addMonths(startOfMonth(rangeEnd), -11);
+  }
+  while (monthStart <= rangeEnd) {
+    wrapper.append(createRecurrenceMonthGrid(item, monthStart, range));
+    monthStart = addMonths(monthStart, 1);
+  }
+  return wrapper;
+}
+
+function createRecurrenceMonthGrid(item, monthDate, range) {
+  const monthStart = startOfMonth(monthDate);
+  const grid = document.createElement("div");
+  grid.className = "recurrence-month";
+
+  const header = document.createElement("div");
+  header.className = "recurrence-month-title";
+  header.textContent = new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long" }).format(monthDate);
+  grid.append(header);
+
+  const weekdays = document.createElement("div");
+  weekdays.className = "recurrence-month-weekdays";
+  ["一", "二", "三", "四", "五", "六", "日"].forEach((day) => {
+    const cell = document.createElement("span");
+    cell.textContent = day;
+    weekdays.append(cell);
+  });
+  grid.append(weekdays);
+
+  const days = document.createElement("div");
+  days.className = "recurrence-month-grid";
+  const start = startOfWeek(monthStart);
+  for (let index = 0; index < 42; index += 1) {
+    const date = addDays(start, index);
+    const iso = toISODate(date);
+    const button = createRecurrenceDayButton(item, iso, "month");
+    button.classList.toggle("is-muted", date.getMonth() !== monthDate.getMonth() || iso < range.start || iso > range.end);
+    button.textContent = String(date.getDate());
+    days.append(button);
+  }
+  grid.append(days);
+  return grid;
+}
+
+function createRecurrenceDayButton(item, iso, mode) {
+  const due = isRecurrenceDueOn(item, iso);
+  const record = recurrenceRecordFor(item, iso);
+  const today = toISODate(new Date());
+  const status = record?.status || (due ? (iso < today ? "missed" : "open") : "none");
+  const button = document.createElement("button");
+  button.className = `recurrence-day is-${status}${iso === state.selectedDate ? " is-today" : ""}`;
+  button.type = "button";
+  button.title = `${formatTaskDate(iso)} · ${due ? recurrenceRecordLabels[status] || "待完成" : "不需要做"}`;
+  if (mode === "short") {
+    button.innerHTML = `<span>${formatWeekday(parseISODate(iso)).replace("周", "")}</span><strong>${parseISODate(iso).getDate()}</strong>`;
+  }
+  button.disabled = !due || iso > today;
+  button.addEventListener("click", () => cycleRecurrenceRecord(item.id, iso));
+  return button;
+}
+
+function createRecurrenceEmptyCard() {
+  const card = document.createElement("div");
+  card.className = "recurrence-empty-card";
+  card.textContent = "还没有周期任务。可以先添加“每日学习半小时日语”或“每周六打扫房间卫生”。";
+  return card;
+}
+
 function renderSearchList(results) {
   results.forEach((result) => {
     if (result.kind === "task") {
@@ -2467,6 +3322,7 @@ function renderSearchList(results) {
 function renderSearchGoalResult(result) {
   const entry = goalEntry(result.goal);
   const expanded = result.children.length > 0 && !state.collapsedSearchGoals.has(result.goal.id);
+  const detailTarget = entryDetailTarget(entry);
   const card = document.createElement("article");
   card.className = `goal-card search-goal-card priority-${result.goal.priority}${result.goal.done ? " is-done" : ""}`;
 
@@ -2496,9 +3352,11 @@ function renderSearchGoalResult(result) {
   const progress = goalProgress(result.goal);
   meta.innerHTML = `<span>中期目标</span><span>截止：${formatOptionalDate(result.goal.dueDate, "未设置")}</span><span>进度：${progress.done}/${progress.total}</span>`;
   body.append(title, meta);
+  appendDetailBlock(body, detailTarget, entry);
 
   const actions = document.createElement("div");
   actions.className = "task-actions";
+  actions.append(createDetailButton(detailTarget, entry));
   if (result.children.length) {
     const expand = document.createElement("button");
     expand.className = `icon-button small expand-button${expanded ? " is-expanded" : ""}`;
@@ -2561,6 +3419,274 @@ function createCancelButton(entry) {
   cancel.hidden = entry.kind !== "task" || entry.done;
   cancel.addEventListener("click", () => toggleTaskCanceled(entry.id));
   return cancel;
+}
+
+function createDetailButton(target, item) {
+  const button = document.createElement("button");
+  button.className = "icon-button small detail-toggle-button";
+  button.type = "button";
+  button.title = "备注";
+  button.setAttribute("aria-label", "备注");
+  button.textContent = "备";
+  button.classList.toggle("is-active", isDetailExpanded(target));
+  button.classList.toggle("has-detail", hasDetailContent(item));
+  button.addEventListener("click", () => toggleDetailExpanded(target));
+  return button;
+}
+
+function appendDetailBlock(container, target, item) {
+  const summary = detailSummaryText(item);
+  if (summary) {
+    const summaryButton = document.createElement("button");
+    summaryButton.className = "detail-summary";
+    summaryButton.type = "button";
+    summaryButton.textContent = summary;
+    summaryButton.addEventListener("click", () => toggleDetailExpanded(target));
+    container.append(summaryButton);
+  }
+  if (isDetailExpanded(target)) {
+    container.append(createDetailPanel(target, item));
+  }
+}
+
+function createDetailPanel(target, item) {
+  const panel = document.createElement("div");
+  panel.className = "planner-detail-panel";
+
+  const header = document.createElement("div");
+  header.className = "planner-detail-header";
+  const title = document.createElement("span");
+  title.textContent = "备注";
+  const addChecklist = document.createElement("button");
+  addChecklist.className = "detail-checklist-add";
+  addChecklist.type = "button";
+  addChecklist.textContent = "清单";
+  addChecklist.addEventListener("click", () => {
+    addForm.hidden = false;
+    addInput.focus();
+  });
+  header.append(title, addChecklist);
+  panel.append(header);
+
+  const note = document.createElement("textarea");
+  note.className = "planner-detail-note";
+  note.rows = 3;
+  note.maxLength = 1200;
+  note.placeholder = "备注";
+  note.value = item.note || "";
+  note.addEventListener("input", () => updateDetailNote(target, note.value, false));
+  panel.append(note);
+
+  const checklist = Array.isArray(item.checklist) ? item.checklist : [];
+  const addForm = document.createElement("form");
+  addForm.className = "planner-checklist-add-form";
+  addForm.hidden = checklist.length === 0;
+  const addInput = document.createElement("input");
+  addInput.type = "text";
+  addInput.maxLength = 160;
+  addInput.placeholder = "添加清单项";
+  const submitAdd = document.createElement("button");
+  submitAdd.className = "save-button";
+  submitAdd.type = "submit";
+  submitAdd.textContent = "添加";
+  addForm.append(addInput, submitAdd);
+  addForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const text = addInput.value.trim();
+    if (!text) return;
+    addChecklistItem(target, text);
+  });
+  panel.append(addForm);
+
+  if (checklist.length) {
+    const stats = checklistStats(item);
+    const checklistHeader = document.createElement("div");
+    checklistHeader.className = "planner-checklist-header";
+    checklistHeader.textContent = `清单 ${stats.done}/${stats.total}`;
+    panel.append(checklistHeader);
+
+    const list = document.createElement("div");
+    list.className = "planner-checklist";
+    checklist.forEach((checkItem) => list.append(createChecklistRow(target, checkItem)));
+    panel.append(list);
+  }
+
+  return panel;
+}
+
+function createChecklistRow(target, checkItem) {
+  const row = document.createElement("div");
+  row.className = `planner-checklist-row${checkItem.done ? " is-done" : ""}`;
+
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = Boolean(checkItem.done);
+  checkbox.addEventListener("change", () => toggleChecklistItem(target, checkItem.id));
+
+  const text = document.createElement("input");
+  text.type = "text";
+  text.maxLength = 160;
+  text.value = checkItem.text;
+  text.setAttribute("aria-label", "清单项");
+  text.addEventListener("change", () => updateChecklistItemText(target, checkItem.id, text.value));
+
+  const remove = document.createElement("button");
+  remove.className = "icon-button small checklist-remove";
+  remove.type = "button";
+  remove.title = "删除清单项";
+  remove.setAttribute("aria-label", "删除清单项");
+  remove.textContent = "×";
+  remove.addEventListener("click", (event) => {
+    event.preventDefault();
+    deleteChecklistItem(target, checkItem.id);
+  });
+
+  row.append(checkbox, text, remove);
+  return row;
+}
+
+function entryDetailTarget(entry) {
+  return {
+    kind: entry.kind,
+    id: entry.id,
+    parentId: entry.parentId || null,
+  };
+}
+
+function recurrenceDetailTarget(item) {
+  return {
+    kind: "recurrence",
+    id: item.id,
+    parentId: null,
+  };
+}
+
+function detailKey(target) {
+  return `${target.kind}:${target.parentId || ""}:${target.id}`;
+}
+
+function isDetailExpanded(target) {
+  return state.expandedDetails.has(detailKey(target));
+}
+
+function toggleDetailExpanded(target) {
+  const key = detailKey(target);
+  if (state.expandedDetails.has(key)) {
+    state.expandedDetails.delete(key);
+  } else {
+    state.expandedDetails.add(key);
+  }
+  render();
+}
+
+function hasDetailContent(item) {
+  return Boolean((item.note || "").trim()) || checklistStats(item).total > 0;
+}
+
+function detailSummaryText(item) {
+  const parts = [];
+  if ((item.note || "").trim()) parts.push("备注");
+  const stats = checklistStats(item);
+  if (stats.total) parts.push(`清单 ${stats.done}/${stats.total}`);
+  return parts.length ? `备注 · ${parts.join(" · ")}` : "";
+}
+
+function checklistStats(item) {
+  const checklist = Array.isArray(item.checklist) ? item.checklist : [];
+  return {
+    done: checklist.filter((checkItem) => checkItem.done).length,
+    total: checklist.length,
+  };
+}
+
+function updateDetailNote(target, note, shouldRender = true) {
+  updateDetailTarget(target, (item) => ({
+    ...item,
+    note,
+    updatedAt: new Date().toISOString(),
+  }));
+  if (shouldRender) render();
+}
+
+function addChecklistItem(target, text) {
+  const now = new Date().toISOString();
+  updateDetailTarget(target, (item) => ({
+    ...item,
+    checklist: [
+      ...(Array.isArray(item.checklist) ? item.checklist : []),
+      {
+        id: createId(),
+        text,
+        done: false,
+        createdAt: now,
+        completedAt: null,
+      },
+    ],
+    updatedAt: now,
+  }));
+  render();
+}
+
+function toggleChecklistItem(target, itemId) {
+  const now = new Date().toISOString();
+  updateDetailTarget(target, (item) => ({
+    ...item,
+    checklist: (Array.isArray(item.checklist) ? item.checklist : []).map((checkItem) =>
+      checkItem.id === itemId
+        ? {
+            ...checkItem,
+            done: !checkItem.done,
+            completedAt: checkItem.done ? null : now,
+          }
+        : checkItem,
+    ),
+    updatedAt: now,
+  }));
+  render();
+}
+
+function updateChecklistItemText(target, itemId, text) {
+  const nextText = text.trim();
+  if (!nextText) {
+    deleteChecklistItem(target, itemId);
+    return;
+  }
+  updateDetailTarget(target, (item) => ({
+    ...item,
+    checklist: (Array.isArray(item.checklist) ? item.checklist : []).map((checkItem) =>
+      checkItem.id === itemId ? { ...checkItem, text: nextText } : checkItem,
+    ),
+    updatedAt: new Date().toISOString(),
+  }));
+  render();
+}
+
+function deleteChecklistItem(target, itemId) {
+  updateDetailTarget(target, (item) => ({
+    ...item,
+    checklist: (Array.isArray(item.checklist) ? item.checklist : []).filter((checkItem) => checkItem.id !== itemId),
+    updatedAt: new Date().toISOString(),
+  }));
+  render();
+}
+
+function updateDetailTarget(target, updater) {
+  if (target.kind === "recurrence") {
+    state.recurrences.items = state.recurrences.items.map((item) => (item.id === target.id ? updater(item) : item));
+    saveRecurrences();
+    return;
+  }
+
+  state.tasks = state.tasks.map((task) => {
+    if (target.kind === "task" && task.id === target.id) return updater(task);
+    if (target.kind === "goal" && task.id === target.id) return updater(task);
+    if (target.kind !== "node" || task.id !== target.parentId) return task;
+    return {
+      ...task,
+      children: task.children.map((child) => (child.id === target.id ? updater(child) : child)),
+    };
+  });
+  saveTasks();
 }
 
 function createEntryEditor(entry, className) {
@@ -2812,16 +3938,16 @@ function updateNode(goalId, nodeId, updates) {
 function renderGoalCard(goal) {
   const progress = goalProgress(goal);
   const expanded = state.expandedGoals.has(goal.id);
+  const entry = goalEntry(goal);
+  const detailTarget = entryDetailTarget(entry);
   const card = document.createElement("article");
   card.className = `goal-card priority-${goal.priority}${goal.done ? " is-done" : ""}`;
 
-  if (isEditingEntry(goalEntry(goal))) {
-    card.append(createEntryEditor(goalEntry(goal), "goal-edit-card"));
+  if (isEditingEntry(entry)) {
+    card.append(createEntryEditor(entry, "goal-edit-card"));
     elements.taskList.appendChild(card);
     return;
   }
-  setupDraggableElement(card, goalEntry(goal));
-
   const header = document.createElement("div");
   header.className = "goal-header";
 
@@ -2841,9 +3967,13 @@ function renderGoalCard(goal) {
   meta.className = "goal-meta";
   meta.innerHTML = `<span>截止：${formatOptionalDate(goal.dueDate, "未设置")}</span><span>进度：${progress.done}/${progress.total}</span><span>节点：${goal.children.length}</span>`;
   body.append(title, meta);
+  appendDetailBlock(body, detailTarget, entry);
 
   const actions = document.createElement("div");
   actions.className = "task-actions";
+  const dragHandle = createPlannerDragHandle(card, entry);
+  if (dragHandle) actions.append(dragHandle);
+  actions.append(createDetailButton(detailTarget, entry));
   const expand = document.createElement("button");
   expand.className = `icon-button small expand-button${expanded ? " is-expanded" : ""}`;
   expand.type = "button";
@@ -2852,14 +3982,14 @@ function renderGoalCard(goal) {
   expand.textContent = "▸";
   expand.addEventListener("click", () => toggleGoalExpanded(goal.id));
   actions.append(expand);
-  actions.append(createEditButton(goalEntry(goal)));
+  actions.append(createEditButton(entry));
   const remove = document.createElement("button");
   remove.className = "icon-button small";
   remove.type = "button";
   remove.title = "删除目标";
   remove.setAttribute("aria-label", "删除目标");
   remove.textContent = "×";
-  remove.addEventListener("click", () => deleteEntry(goalEntry(goal)));
+  remove.addEventListener("click", () => deleteEntry(entry));
   actions.append(remove);
 
   header.append(check, body, actions);
@@ -2894,7 +4024,7 @@ function createNodeForm(goal) {
   const form = document.createElement("form");
   form.className = "node-form";
   form.innerHTML = `
-    <input type="text" maxlength="80" placeholder="添加节点，例如 9/14 下载准考证" required />
+    <input type="text" maxlength="80" placeholder="添加节点" required />
     <input type="date" />
     <select aria-label="节点重要性">
       <option value="normal">普通</option>
@@ -2914,6 +4044,8 @@ function createNodeForm(goal) {
       date: dateInput.value || null,
       priority: prioritySelect.value,
       done: false,
+      note: "",
+      checklist: [],
       order: nextOrder(),
       createdAt: new Date().toISOString(),
       completedAt: null,
@@ -2924,11 +4056,11 @@ function createNodeForm(goal) {
 
 function createNodeItem(goal, child) {
   const entry = nodeEntry(goal, child);
+  const detailTarget = entryDetailTarget(entry);
   if (isEditingEntry(entry)) return createEntryEditor(entry, "node-item edit-card");
 
   const item = document.createElement("div");
   item.className = `node-item priority-${child.priority}${child.done ? " is-done" : ""}`;
-  setupDraggableElement(item, entry);
 
   const check = document.createElement("button");
   check.className = `check-button${child.done ? " is-checked" : ""}`;
@@ -2944,18 +4076,12 @@ function createNodeItem(goal, child) {
   meta.className = "node-meta";
   meta.textContent = formatOptionalDate(child.date, "未安排日期");
   body.append(title, meta);
+  appendDetailBlock(body, detailTarget, entry);
 
   const actions = document.createElement("div");
   actions.className = "task-actions";
+  actions.append(createDetailButton(detailTarget, entry));
   actions.append(createEditButton(entry));
-  const schedule = document.createElement("button");
-  schedule.className = "icon-button small";
-  schedule.type = "button";
-  schedule.title = "安排到今天";
-  schedule.setAttribute("aria-label", "安排到今天");
-  schedule.textContent = "◎";
-  schedule.hidden = child.done || child.date === state.selectedDate;
-  schedule.addEventListener("click", () => scheduleNodeToday(goal.id, child.id));
   const remove = document.createElement("button");
   remove.className = "icon-button small";
   remove.type = "button";
@@ -2963,7 +4089,7 @@ function createNodeItem(goal, child) {
   remove.setAttribute("aria-label", "删除节点");
   remove.textContent = "×";
   remove.addEventListener("click", () => deleteNode(goal.id, child.id));
-  actions.append(schedule, remove);
+  actions.append(remove);
 
   item.append(check, body, actions);
   return item;
@@ -3050,7 +4176,7 @@ function createBirthdayEditor(entry) {
       </label>
       <label class="date-field birthday-year-field">
         <span>年份</span>
-        <input name="birthYear" type="number" min="1" max="9999" value="${entry.birthYear || ""}" aria-label="年份" placeholder="可不填" />
+        <input name="birthYear" type="number" min="1" max="9999" value="${entry.birthYear || ""}" aria-label="年份" />
       </label>
       <label class="select-field">
         <span>月份</span>
@@ -3064,7 +4190,7 @@ function createBirthdayEditor(entry) {
         <input name="isLeapMonth" type="checkbox"${entry.isLeapMonth ? " checked" : ""} />
         <span>闰月</span>
       </label>
-      <input class="birthday-edit-note" name="note" type="text" maxlength="80" value="${escapeHtml(entry.note)}" aria-label="备注" placeholder="备注，可不填" />
+      <input class="birthday-edit-note" name="note" type="text" maxlength="80" value="${escapeHtml(entry.note)}" aria-label="备注" placeholder="备注" />
       <div class="edit-actions">
         <button class="save-button" type="submit">保存</button>
         <button class="cancel-button" type="button">取消</button>
@@ -3132,8 +4258,10 @@ function createBirthdayEditor(entry) {
 function filteredEntries() {
   if (state.module === "english") return [];
   if (state.module === "knowledge") return [];
+  if (state.module === "shopping") return [];
   if (state.view === "search") return searchResults();
   if (state.view === "birthday") return birthdayEntries();
+  if (state.view === "recurrence") return recurrenceEntries();
   return filterByStatus(baseEntriesForView(), currentStatusFilter()).sort(sortEntries);
 }
 
@@ -3175,8 +4303,16 @@ function allMediumGoals() {
   return state.tasks.filter((task) => task.scope === "medium");
 }
 
-function activeMediumGoals() {
-  return allMediumGoals().filter((goal) => !goal.done);
+function recurrenceEntries() {
+  return [...state.recurrences.items].sort((a, b) => {
+    if (a.active !== b.active) return a.active ? -1 : 1;
+    if ((a.order || 0) !== (b.order || 0)) return (a.order || 0) - (b.order || 0);
+    return (a.createdAt || "").localeCompare(b.createdAt || "");
+  });
+}
+
+function todayRecurrenceEntries() {
+  return recurrenceEntries().filter((item) => item.active && isRecurrenceDueOn(item, state.selectedDate));
 }
 
 function mediumEntries() {
@@ -3224,7 +4360,7 @@ function searchResults() {
       const children = goal.children
         .map((child) => nodeEntry(goal, child))
         .filter(matchesSearch)
-        .sort(sortEntries);
+        .sort(sortNodesByDate);
       if (!parentMatched && !children.length) return null;
       return {
         kind: "goal",
@@ -3242,7 +4378,8 @@ function searchResults() {
 
 function matchesSearch(entry) {
   const keyword = state.search.keyword;
-  const text = `${entry.title} ${entry.parentTitle || ""}`.toLowerCase();
+  const checklistText = Array.isArray(entry.checklist) ? entry.checklist.map((item) => item.text).join(" ") : "";
+  const text = `${entry.title} ${entry.parentTitle || ""} ${entry.note || ""} ${checklistText}`.toLowerCase();
   const dateValue = entry.kind === "goal" ? entry.dueDate : entry.date;
 
   if (keyword && !text.includes(keyword)) return false;
@@ -3252,13 +4389,6 @@ function matchesSearch(entry) {
   if (state.search.status === "open" && (entry.done || isCanceled(entry))) return false;
   if (state.search.status === "canceled" && !isCanceled(entry)) return false;
   return true;
-}
-
-function completionStats(entries) {
-  return {
-    done: entries.filter((entry) => entry.done).length,
-    total: entries.length,
-  };
 }
 
 function unitCompletionStats(entries) {
@@ -3328,7 +4458,8 @@ function currentViewTitle() {
     };
     return titles[state.knowledgeView] || "知识文库";
   }
-  if (state.view === "today") return formatShortDate(parseISODate(state.selectedDate));
+  if (state.module === "shopping") return "商品比价";
+  if (state.view === "today") return formatTaskDate(state.selectedDate);
   return viewTitles[state.view];
 }
 
@@ -3337,9 +4468,11 @@ function currentViewMeta(entries) {
   if (state.module === "knowledge") {
     return `${state.knowledge.categories.length} 个分类 · ${state.knowledge.documents.length} 篇文档`;
   }
+  if (state.module === "shopping") return "";
   if (state.view === "search") return `${countSearchResults(entries)} 项匹配`;
   if (state.view === "birthday") return `${entries.length} 个生日`;
   if (state.view === "medium") return `${entries.length} 个目标 · ${formatRatio(goalCompletionStats(allMediumGoals()))} 已完成`;
+  if (state.view === "recurrence") return `${entries.length} 个周期`;
   const canceled = canceledCount(entries);
   return `${formatRatio(unitCompletionStats(entries))} 已完成${canceled ? ` · ${canceled} 已取消` : ""}`;
 }
@@ -3361,8 +4494,15 @@ function sortEntries(a, b) {
   return (a.createdAt || "").localeCompare(b.createdAt || "");
 }
 
+function sortNodesByDate(a, b) {
+  if (a.date && b.date && a.date !== b.date) return a.date.localeCompare(b.date);
+  if (a.date && !b.date) return -1;
+  if (!a.date && b.date) return 1;
+  return sortEntries(a, b);
+}
+
 function sortedChildren(goal) {
-  return [...goal.children].sort(sortEntries);
+  return [...goal.children].sort(sortNodesByDate);
 }
 
 function toggleGoalExpanded(id) {
@@ -3392,8 +4532,21 @@ function toggleScheduleGroup(key) {
   render();
 }
 
+function toggleRecurrenceExpanded(id) {
+  if (state.expandedRecurrences.has(id)) {
+    state.expandedRecurrences.delete(id);
+  } else {
+    state.expandedRecurrences.add(id);
+  }
+  render();
+}
+
 function canReorderCurrentView() {
   return state.module === "planner" && ["today", "medium"].includes(state.view) && currentStatusFilter() === "all";
+}
+
+function canReorderRecurrenceView() {
+  return state.module === "planner" && state.view === "recurrence";
 }
 
 function canReorderKnowledgeView() {
@@ -3405,26 +4558,124 @@ function canReorderKnowledgeView() {
   );
 }
 
-function setupDraggableElement(element, entry) {
-  if (!canReorderCurrentView() || isEditingEntry(entry)) return;
-  element.dataset.entryKey = serializeEntryKey(editKey(entry));
-  element.title = element.title ? `${element.title}；可拖拽调整顺序` : "可拖拽调整顺序";
+function canReorderShoppingView() {
+  return state.module === "shopping" && state.shoppingSort === "custom" && !state.shoppingSearch;
+}
 
-  element.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || event.target.closest("button, input, select, textarea, label, form")) return;
-    const sourceKey = editKey(entry);
-    state.dragging = editKey(entry);
-    state.dragTarget = null;
-    state.dropAfter = false;
-    element.classList.add("is-dragging");
-    event.preventDefault();
+function createPlannerDragHandle(element, entry) {
+  if (!canReorderCurrentView() || isEditingEntry(entry)) return null;
+  if (state.view === "today" && entry.kind !== "task") return null;
+  if (state.view === "medium" && entry.kind !== "goal") return null;
+  const handle = createDragHandle();
+  setupPlannerSortable(element, entry, handle);
+  return handle;
+}
+
+function createDragHandle() {
+  const handle = document.createElement("button");
+  handle.className = "icon-button small drag-handle";
+  handle.type = "button";
+  handle.dataset.dragHandle = "";
+  handle.title = "拖动排序";
+  handle.setAttribute("aria-label", "拖动排序");
+  handle.textContent = "☰";
+  return handle;
+}
+
+function dragHandleHtml() {
+  return '<button class="icon-button small drag-handle" type="button" data-drag-handle title="拖动排序" aria-label="拖动排序">☰</button>';
+}
+
+function setupPlannerSortable(element, entry, handle) {
+  setupSortableElement(element, editKey(entry), {
+    handle,
+    canDrop: sameEntryLayer,
+    onDrop: reorderVisibleEntries,
+  });
+}
+
+function setupRecurrenceSortable(element, id) {
+  if (!canReorderRecurrenceView()) return;
+  const handle = element.querySelector("[data-drag-handle]");
+  if (!handle) return;
+  setupSortableElement(element, { kind: "recurrence", id }, {
+    handle,
+    canDrop: sameSortableLayer,
+    onDrop: reorderRecurrences,
+  });
+}
+
+function setupKnowledgeDraggableElement(element, key) {
+  if (state.module !== "knowledge" || state.knowledgeView !== "categories" || state.knowledgeSearch) return;
+  if (state.knowledgeBatch.active) return;
+  if (key.kind === "category" && state.knowledgeCategorySort !== "custom") return;
+  if (key.kind === "document" && (!key.categoryId || state.knowledgeDocumentSort !== "custom")) return;
+  const handle = element.querySelector("[data-drag-handle]");
+  if (!handle) return;
+  setupSortableElement(element, key, {
+    handle,
+    canDrop: (sourceKey, targetKey) => sameKnowledgeKeyLayer(sourceKey, targetKey) && !sameKnowledgeKey(sourceKey, targetKey),
+    onDrop: reorderKnowledgeItems,
+  });
+}
+
+function setupShoppingProductSortable(element, id) {
+  if (!canReorderShoppingView()) return;
+  const handle = element.querySelector("[data-drag-handle]");
+  if (!handle) return;
+  setupSortableElement(element, { kind: "shopping-product", id }, {
+    handle,
+    canDrop: sameSortableLayer,
+    onDrop: reorderShoppingProducts,
+  });
+}
+
+function setupShoppingTabSortable(element, handle, key) {
+  if (state.module !== "shopping" || state.shoppingSearch) return;
+  setupSortableElement(element, key, {
+    handle,
+    canDrop: (sourceKey, targetKey) => {
+      if (!sameSortableLayer(sourceKey, targetKey)) return false;
+      return sourceKey.kind !== "shopping-subcategory" || sourceKey.categoryId === targetKey.categoryId;
+    },
+    onDrop: reorderShoppingTabs,
+  });
+}
+
+function setupSortableElement(element, sourceKey, options) {
+  const handle = options.handle || element;
+  if (!handle) return;
+  element.dataset.sortKey = JSON.stringify(sourceKey);
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let dragging = false;
+
+    const blockClick = (clickEvent) => {
+      clickEvent.preventDefault();
+      clickEvent.stopImmediatePropagation();
+    };
+
+    const startDragging = () => {
+      dragging = true;
+      state.dragging = sourceKey;
+      state.dragTarget = null;
+      state.dropAfter = false;
+      element.classList.add("is-dragging");
+    };
 
     const onPointerMove = (moveEvent) => {
-      const target = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY)?.closest("[data-entry-key]");
+      const distance = Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY);
+      if (!dragging && distance < 5) return;
+      if (!dragging) startDragging();
+      moveEvent.preventDefault();
+
+      const target = sortableTargetFromPoint(moveEvent.clientX, moveEvent.clientY, element, sourceKey, options);
       clearDropTargets();
-      if (!target || target === element) return;
-      const targetKey = parseEntryKey(target.dataset.entryKey);
-      if (sameEntryKey(sourceKey, targetKey)) return;
+      if (!target) return;
+      const targetKey = parseSortableKey(target.dataset.sortKey);
       const rect = target.getBoundingClientRect();
       const after = moveEvent.clientY > rect.top + rect.height / 2;
       target.classList.toggle("drop-before", !after);
@@ -3438,8 +4689,11 @@ function setupDraggableElement(element, entry) {
       document.removeEventListener("pointerup", onPointerUp);
       element.classList.remove("is-dragging");
       clearDropTargets();
-      if (state.dragging && state.dragTarget) {
-        reorderVisibleEntries(state.dragging, state.dragTarget, state.dropAfter);
+      if (dragging) {
+        handle.addEventListener("click", blockClick, { once: true, capture: true });
+        if (state.dragging && state.dragTarget) {
+          options.onDrop(state.dragging, state.dragTarget, state.dropAfter);
+        }
       }
       state.dragging = null;
       state.dragTarget = null;
@@ -3451,65 +4705,15 @@ function setupDraggableElement(element, entry) {
   });
 }
 
-function setupKnowledgeDraggableElement(element, key) {
-  if (state.module !== "knowledge" || state.knowledgeView !== "categories" || state.knowledgeSearch) return;
-  if (state.knowledgeBatch.active) return;
-  if (key.kind === "category" && state.knowledgeCategorySort !== "custom") return;
-  if (key.kind === "document" && (!key.categoryId || state.knowledgeDocumentSort !== "custom")) return;
-  const handle = element.querySelector("[data-drag-handle]");
-  if (!handle) return;
-
-  element.dataset.knowledgeKey = serializeKnowledgeKey(key);
-
-  handle.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
-    state.knowledgeDragging = key;
-    state.knowledgeDragTarget = null;
-    state.knowledgeDropAfter = false;
-    element.classList.add("is-dragging");
-    event.preventDefault();
-
-    const onPointerMove = (moveEvent) => {
-      const target = knowledgeDropTargetFromPoint(moveEvent.clientX, moveEvent.clientY, key);
-      clearDropTargets();
-      if (!target || target === element) return;
-      const targetKey = parseKnowledgeKey(target.dataset.knowledgeKey);
-      if (!targetKey || !sameKnowledgeKeyLayer(key, targetKey) || sameKnowledgeKey(key, targetKey)) return;
-      const rect = target.getBoundingClientRect();
-      const after = moveEvent.clientY > rect.top + rect.height / 2;
-      target.classList.toggle("drop-before", !after);
-      target.classList.toggle("drop-after", after);
-      state.knowledgeDragTarget = targetKey;
-      state.knowledgeDropAfter = after;
-    };
-
-    const onPointerUp = () => {
-      document.removeEventListener("pointermove", onPointerMove);
-      document.removeEventListener("pointerup", onPointerUp);
-      element.classList.remove("is-dragging");
-      clearDropTargets();
-      if (state.knowledgeDragging && state.knowledgeDragTarget) {
-        reorderKnowledgeItems(state.knowledgeDragging, state.knowledgeDragTarget, state.knowledgeDropAfter);
-      }
-      state.knowledgeDragging = null;
-      state.knowledgeDragTarget = null;
-      state.knowledgeDropAfter = false;
-    };
-
-    document.addEventListener("pointermove", onPointerMove);
-    document.addEventListener("pointerup", onPointerUp);
-  });
-}
-
-function knowledgeDropTargetFromPoint(x, y, sourceKey) {
+function sortableTargetFromPoint(x, y, sourceElement, sourceKey, options) {
   const candidates = [];
   document.elementsFromPoint(x, y).forEach((element) => {
-    const target = element.closest("[data-knowledge-key]");
-    if (target && !candidates.includes(target)) candidates.push(target);
+    const target = element.closest("[data-sort-key]");
+    if (target && target !== sourceElement && !candidates.includes(target)) candidates.push(target);
   });
   return candidates.find((target) => {
-    const targetKey = parseKnowledgeKey(target.dataset.knowledgeKey);
-    return targetKey && sameKnowledgeKeyLayer(sourceKey, targetKey) && !sameKnowledgeKey(sourceKey, targetKey);
+    const targetKey = parseSortableKey(target.dataset.sortKey);
+    return targetKey && options.canDrop(sourceKey, targetKey);
   });
 }
 
@@ -3587,6 +4791,57 @@ function reorderKnowledgeItems(sourceKey, targetKey, after) {
   render();
 }
 
+function reorderRecurrences(sourceKey, targetKey, after) {
+  const items = recurrenceEntries();
+  const reordered = reorderByIds(items, sourceKey.id, targetKey.id, after);
+  const startOrder = Math.min(...items.map((item) => item.order || 0));
+  reordered.forEach((item, index) => {
+    item.order = startOrder + index + 1;
+    item.updatedAt = new Date().toISOString();
+  });
+  state.recurrences.items = state.recurrences.items.map((item) => reordered.find((entry) => entry.id === item.id) || item);
+  saveRecurrences();
+  render();
+}
+
+function reorderShoppingProducts(sourceKey, targetKey, after) {
+  const products = shoppingVisibleProducts();
+  const reordered = reorderByIds(products, sourceKey.id, targetKey.id, after);
+  const startOrder = Math.min(...products.map((product) => product.order || 0));
+  reordered.forEach((product, index) => {
+    product.order = startOrder + index + 1;
+    product.updatedAt = new Date().toISOString();
+  });
+  state.shopping.products = state.shopping.products.map((product) => reordered.find((entry) => entry.id === product.id) || product);
+  saveShopping();
+  render();
+}
+
+function reorderShoppingTabs(sourceKey, targetKey, after) {
+  if (sourceKey.kind === "shopping-category") {
+    const categories = sortedShoppingCategories();
+    const reordered = reorderByIds(categories, sourceKey.id, targetKey.id, after);
+    reordered.forEach((category, index) => {
+      category.order = index + 1;
+      category.updatedAt = new Date().toISOString();
+    });
+    state.shopping.categories = state.shopping.categories.map((category) => reordered.find((entry) => entry.id === category.id) || category);
+  }
+
+  if (sourceKey.kind === "shopping-subcategory") {
+    const subcategories = shoppingSubcategoriesFor(sourceKey.categoryId);
+    const reordered = reorderByIds(subcategories, sourceKey.id, targetKey.id, after);
+    reordered.forEach((subcategory, index) => {
+      subcategory.order = index + 1;
+      subcategory.updatedAt = new Date().toISOString();
+    });
+    state.shopping.subcategories = state.shopping.subcategories.map((subcategory) => reordered.find((entry) => entry.id === subcategory.id) || subcategory);
+  }
+
+  saveShopping();
+  render();
+}
+
 function reorderByIds(items, sourceId, targetId, after) {
   const sourceIndex = items.findIndex((item) => item.id === sourceId);
   const targetIndex = items.findIndex((item) => item.id === targetId);
@@ -3600,20 +4855,6 @@ function reorderByIds(items, sourceId, targetId, after) {
   return ordered;
 }
 
-function serializeEntryKey(key) {
-  return `${key.kind}:${key.parentId || ""}:${key.id}`;
-}
-
-function serializeKnowledgeKey(key) {
-  return `${key.kind}:${key.categoryId || ""}:${key.id}`;
-}
-
-function parseKnowledgeKey(value) {
-  const [kind, categoryId, id] = String(value || "").split(":");
-  if (!kind || !id) return null;
-  return { kind, categoryId: categoryId || null, id };
-}
-
 function sameKnowledgeKey(first, second) {
   return first?.kind === second?.kind && first?.id === second?.id && first?.categoryId === second?.categoryId;
 }
@@ -3622,13 +4863,24 @@ function sameKnowledgeKeyLayer(first, second) {
   return first?.kind === second?.kind && (first.kind === "category" || first.categoryId === second.categoryId);
 }
 
-function parseEntryKey(value) {
-  const [kind, parentId, id] = value.split(":");
-  return { kind, parentId: parentId || null, id };
+function sameEntryKey(a, b) {
+  return a?.kind === b?.kind && a?.id === b?.id && (a?.parentId || null) === (b?.parentId || null);
 }
 
-function sameEntryKey(a, b) {
-  return a.kind === b.kind && a.id === b.id && (a.parentId || null) === (b.parentId || null);
+function sameEntryLayer(a, b) {
+  return a?.kind === b?.kind && a?.id !== b?.id && (a?.parentId || null) === (b?.parentId || null);
+}
+
+function sameSortableLayer(first, second) {
+  return first?.kind === second?.kind && first?.id !== second?.id;
+}
+
+function parseSortableKey(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 function toggleEntryDone(entry) {
@@ -3699,6 +4951,328 @@ function addNode(goalId, child) {
   render();
 }
 
+function addRecurrence(data) {
+  const now = new Date().toISOString();
+  state.recurrences.items = [
+    {
+      id: createId(),
+      title: data.title,
+      frequency: normalizeRecurrenceFrequency(data.frequency),
+      startDate: data.startDate,
+      endDate: null,
+      active: true,
+      priority: normalizePriority(data.priority),
+      note: "",
+      checklist: [],
+      order: nextOrder(),
+      records: {},
+      createdAt: now,
+      updatedAt: now,
+    },
+    ...state.recurrences.items,
+  ];
+  saveRecurrences();
+  render();
+}
+
+function updateRecurrence(id, updates) {
+  state.recurrences.items = state.recurrences.items.map((item) =>
+    item.id === id
+      ? {
+          ...item,
+          title: updates.title,
+          frequency: normalizeRecurrenceFrequency(updates.frequency),
+          startDate: updates.startDate,
+          priority: normalizePriority(updates.priority),
+          updatedAt: new Date().toISOString(),
+        }
+      : item,
+  );
+  state.recurrenceEditing = null;
+  saveRecurrences();
+  markMissedRecurrences();
+  render();
+}
+
+function toggleRecurrenceActive(id) {
+  state.recurrences.items = state.recurrences.items.map((item) => {
+    if (item.id !== id) return item;
+    const active = !item.active;
+    return {
+      ...item,
+      active,
+      endDate: active ? null : state.selectedDate,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+  saveRecurrences();
+  render();
+}
+
+function deleteRecurrence(id) {
+  const shouldDelete = confirm("删除这个周期任务会同时删除它的完成历史。继续删除吗？");
+  if (!shouldDelete) return;
+  state.recurrences.items = state.recurrences.items.filter((item) => item.id !== id);
+  state.recurrenceEditing = null;
+  saveRecurrences();
+  render();
+}
+
+function setRecurrenceRecord(id, iso, status, note = "") {
+  state.recurrences.items = state.recurrences.items.map((item) => {
+    if (item.id !== id) return item;
+    const records = { ...item.records };
+    if (!status) {
+      delete records[iso];
+    } else {
+      records[iso] = {
+        status,
+        note,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+    return {
+      ...item,
+      records,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+  saveRecurrences();
+  render();
+}
+
+function toggleTodayRecurrenceDone(id) {
+  const item = state.recurrences.items.find((entry) => entry.id === id);
+  const status = recurrenceRecordFor(item, state.selectedDate)?.status;
+  setRecurrenceRecord(id, state.selectedDate, status === "done" ? null : "done");
+}
+
+function toggleTodayRecurrenceSkipped(id) {
+  const item = state.recurrences.items.find((entry) => entry.id === id);
+  const status = recurrenceRecordFor(item, state.selectedDate)?.status;
+  setRecurrenceRecord(id, state.selectedDate, status === "skipped" ? null : "skipped");
+}
+
+function cycleRecurrenceRecord(id, iso) {
+  const item = state.recurrences.items.find((entry) => entry.id === id);
+  if (!item || !isRecurrenceDueOn(item, iso)) return;
+  const current = recurrenceRecordFor(item, iso)?.status || null;
+  const next = current === "done" ? "missed" : current === "missed" ? "skipped" : current === "skipped" ? null : "done";
+  setRecurrenceRecord(id, iso, next);
+}
+
+function addShoppingCategory(name) {
+  const id = createId();
+  state.shopping.categories.push({
+    id,
+    name,
+    order: nextShoppingCategoryOrder(),
+    createdAt: new Date().toISOString(),
+    updatedAt: null,
+  });
+  state.shoppingCategoryId = id;
+  state.shoppingSubcategoryId = "all";
+  saveShopping();
+  render();
+}
+
+function renameShoppingCategory(id) {
+  const category = shoppingCategoryById(id);
+  if (!category) return;
+  const name = prompt("一级分类名称：", category.name);
+  if (name === null || !name.trim()) return;
+  state.shopping.categories = state.shopping.categories.map((item) =>
+    item.id === id ? { ...item, name: name.trim(), updatedAt: new Date().toISOString() } : item,
+  );
+  saveShopping();
+  render();
+}
+
+function deleteShoppingCategory(id) {
+  if (state.shopping.subcategories.some((item) => item.categoryId === id) || state.shopping.products.some((item) => item.categoryId === id)) {
+    alert("这个一级分类下面还有二级分类或商品，先删除里面的内容后再删除分类。");
+    return;
+  }
+  state.shopping.categories = state.shopping.categories.filter((item) => item.id !== id);
+  if (state.shoppingCategoryId === id) {
+    state.shoppingCategoryId = "all";
+    state.shoppingSubcategoryId = "all";
+  }
+  saveShopping();
+  render();
+}
+
+function addShoppingSubcategory(categoryId, name) {
+  const id = createId();
+  state.shopping.subcategories.push({
+    id,
+    categoryId,
+    name,
+    order: nextShoppingSubcategoryOrder(categoryId),
+    createdAt: new Date().toISOString(),
+    updatedAt: null,
+  });
+  state.shoppingSubcategoryId = id;
+  saveShopping();
+  render();
+}
+
+function renameShoppingSubcategory(id) {
+  const subcategory = shoppingSubcategoryById(id);
+  if (!subcategory) return;
+  const name = prompt("二级分类名称：", subcategory.name);
+  if (name === null || !name.trim()) return;
+  state.shopping.subcategories = state.shopping.subcategories.map((item) =>
+    item.id === id ? { ...item, name: name.trim(), updatedAt: new Date().toISOString() } : item,
+  );
+  saveShopping();
+  render();
+}
+
+function deleteShoppingSubcategory(id) {
+  if (state.shopping.products.some((item) => item.subcategoryId === id)) {
+    alert("这个二级分类下面还有商品，先删除商品后再删除分类。");
+    return;
+  }
+  state.shopping.subcategories = state.shopping.subcategories.filter((item) => item.id !== id);
+  if (state.shoppingSubcategoryId === id) state.shoppingSubcategoryId = "all";
+  saveShopping();
+  render();
+}
+
+function addShoppingProduct(data) {
+  const id = createId();
+  state.shopping.products.push({
+    id,
+    name: data.name,
+    categoryId: data.categoryId,
+    subcategoryId: data.subcategoryId || null,
+    unit: data.unit || "",
+    order: nextShoppingProductOrder(),
+    records: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: null,
+  });
+  state.shoppingCategoryId = data.categoryId;
+  state.shoppingSubcategoryId = data.subcategoryId || "all";
+  state.shoppingExpandedProductId = id;
+  saveShopping();
+  render();
+}
+
+function updateShoppingProduct(id, updates) {
+  state.shopping.products = state.shopping.products.map((product) =>
+    product.id === id
+      ? {
+          ...product,
+          ...updates,
+          updatedAt: new Date().toISOString(),
+        }
+      : product,
+  );
+  saveShopping();
+  render();
+}
+
+function renameShoppingProduct(id) {
+  const product = shoppingProductById(id);
+  if (!product) return;
+  const name = prompt("商品名称：", product.name);
+  if (name === null || !name.trim()) return;
+  updateShoppingProduct(id, { name: name.trim() });
+}
+
+function deleteShoppingProduct(id) {
+  const shouldDelete = confirm("删除这个商品会同时删除它的购买记录。继续删除吗？");
+  if (!shouldDelete) return;
+  state.shopping.products = state.shopping.products.filter((product) => product.id !== id);
+  if (state.shoppingExpandedProductId === id) state.shoppingExpandedProductId = null;
+  saveShopping();
+  render();
+}
+
+function addShoppingRecord(productId, record) {
+  state.shopping.products = state.shopping.products.map((product) => {
+    if (product.id !== productId) return product;
+    return {
+      ...product,
+      records: [
+        ...product.records,
+        {
+          id: createId(),
+          date: record.date,
+          platform: record.platform,
+          totalPrice: roundMoney(record.totalPrice),
+          quantity: roundMoney(record.quantity),
+          note: record.note || "",
+          createdAt: new Date().toISOString(),
+          updatedAt: null,
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+    };
+  });
+  saveShopping();
+  render();
+}
+
+function editShoppingRecord(productId, recordId) {
+  const product = shoppingProductById(productId);
+  const record = product?.records.find((item) => item.id === recordId);
+  if (!record) return;
+  const date = prompt("购买日期：", record.date);
+  if (date === null) return;
+  const platform = prompt("平台：", record.platform);
+  if (platform === null || !platform.trim()) return;
+  const totalPrice = prompt("总价（元）：", formatMoney(record.totalPrice));
+  if (totalPrice === null) return;
+  const quantity = prompt("数量：", formatQuantity(record.quantity));
+  if (quantity === null) return;
+  const note = prompt("备注：", record.note || "");
+  if (note === null) return;
+  const parsedTotal = normalizeMoneyInput(totalPrice);
+  const parsedQuantity = normalizeMoneyInput(quantity);
+  if (!isISODate(date) || parsedTotal === null || parsedQuantity === null || parsedQuantity <= 0) {
+    alert("记录格式不正确，请检查日期、总价和数量。");
+    return;
+  }
+  state.shopping.products = state.shopping.products.map((item) => {
+    if (item.id !== productId) return item;
+    return {
+      ...item,
+      records: item.records.map((entry) =>
+        entry.id === recordId
+          ? {
+              ...entry,
+              date,
+              platform: platform.trim(),
+              totalPrice: roundMoney(parsedTotal),
+              quantity: roundMoney(parsedQuantity),
+              note: note.trim(),
+              updatedAt: new Date().toISOString(),
+            }
+          : entry,
+      ),
+      updatedAt: new Date().toISOString(),
+    };
+  });
+  saveShopping();
+  render();
+}
+
+function deleteShoppingRecord(productId, recordId) {
+  state.shopping.products = state.shopping.products.map((product) => {
+    if (product.id !== productId) return product;
+    return {
+      ...product,
+      records: product.records.filter((record) => record.id !== recordId),
+      updatedAt: new Date().toISOString(),
+    };
+  });
+  saveShopping();
+  render();
+}
+
 function updateBirthday(id, updates) {
   state.birthdays = state.birthdays.map((birthday) => {
     if (birthday.id !== id) return birthday;
@@ -3724,29 +5298,6 @@ function deleteBirthday(id) {
   state.birthdays = state.birthdays.filter((birthday) => birthday.id !== id);
   state.birthdayEditing = null;
   saveBirthdays();
-  render();
-}
-
-function scheduleEntryToday(entry) {
-  if (entry.kind === "task") scheduleTaskToday(entry.id);
-  if (entry.kind === "node") scheduleNodeToday(entry.parentId, entry.id);
-}
-
-function scheduleTaskToday(id) {
-  state.tasks = state.tasks.map((task) => (task.id === id ? { ...task, date: state.selectedDate } : task));
-  saveTasks();
-  render();
-}
-
-function scheduleNodeToday(goalId, nodeId) {
-  state.tasks = state.tasks.map((task) => {
-    if (task.id !== goalId) return task;
-    return {
-      ...task,
-      children: task.children.map((child) => (child.id === nodeId ? { ...child, date: state.selectedDate } : child)),
-    };
-  });
-  saveTasks();
   render();
 }
 
@@ -3787,6 +5338,291 @@ function syncGoalDone(goal) {
   if (!goal.children.length) return goal;
   const done = goal.children.every((child) => child.done);
   return withDone(goal, done);
+}
+
+function readRecurrenceFrequency(form) {
+  const type = form.elements.frequencyType.value;
+  if (type === "weekly") {
+    return {
+      type,
+      weekday: clampInteger(form.elements.weekday.value, 1, 7, isoWeekday(parseISODate(state.selectedDate))),
+    };
+  }
+  if (type === "interval") {
+    return {
+      type,
+      everyDays: clampInteger(form.elements.everyDays.value, 2, 365, 2),
+    };
+  }
+  if (type === "monthly") {
+    return {
+      type,
+      monthDay: clampInteger(form.elements.monthDay.value, 1, 31, parseISODate(state.selectedDate).getDate()),
+    };
+  }
+  return { type: "daily" };
+}
+
+function isRecurrenceDueOn(item, iso) {
+  if (!item || iso < item.startDate) return false;
+  if (item.endDate && iso > item.endDate) return false;
+  const date = parseISODate(iso);
+  const frequency = normalizeRecurrenceFrequency(item.frequency);
+  if (frequency.type === "daily") return true;
+  if (frequency.type === "weekly") return isoWeekday(date) === frequency.weekday;
+  if (frequency.type === "interval") return daysBetween(item.startDate, iso) % frequency.everyDays === 0;
+  if (frequency.type === "monthly") {
+    const dueDay = Math.min(frequency.monthDay, solarMonthDays(date.getFullYear(), date.getMonth() + 1));
+    return date.getDate() === dueDay;
+  }
+  return false;
+}
+
+function recurrenceRecordFor(item, iso) {
+  return item.records?.[iso] || null;
+}
+
+function recurrenceTodayMeta(items) {
+  const done = items.filter((item) => recurrenceRecordFor(item, state.selectedDate)?.status === "done").length;
+  const skipped = items.filter((item) => recurrenceRecordFor(item, state.selectedDate)?.status === "skipped").length;
+  const open = items.length - done - skipped;
+  return `${items.length} 个 · ${done} 完成 · ${open} 待完成${skipped ? ` · ${skipped} 跳过` : ""}`;
+}
+
+function recurrenceStatusText(item, iso) {
+  const status = recurrenceRecordFor(item, iso)?.status;
+  if (status) return recurrenceRecordLabels[status] || "已记录";
+  return iso < toISODate(new Date()) ? "未完成" : "待完成";
+}
+
+function recurrencePeriodStats(item, startIso, endIso) {
+  const dates = recurrenceDueDates(item, startIso, endIso);
+  const stats = {
+    due: dates.length,
+    done: 0,
+    missed: 0,
+    skipped: 0,
+    rate: 0,
+    longestStreak: 0,
+    currentStreak: 0,
+  };
+  let streak = 0;
+  dates.forEach((iso) => {
+    const status = recurrenceRecordFor(item, iso)?.status || (iso < toISODate(new Date()) ? "missed" : "open");
+    if (status === "done") {
+      stats.done += 1;
+      streak += 1;
+      stats.longestStreak = Math.max(stats.longestStreak, streak);
+    } else {
+      if (status === "missed") stats.missed += 1;
+      if (status === "skipped") stats.skipped += 1;
+      if (status !== "skipped") streak = 0;
+    }
+  });
+  stats.currentStreak = currentRecurrenceStreak(item);
+  const effectiveDue = stats.due - stats.skipped;
+  stats.rate = effectiveDue ? Math.round((stats.done / effectiveDue) * 100) : 0;
+  return stats;
+}
+
+function currentRecurrenceStreak(item) {
+  let cursor = parseISODate(state.selectedDate);
+  let streak = 0;
+  for (let index = 0; index < 366; index += 1) {
+    const iso = toISODate(cursor);
+    if (isRecurrenceDueOn(item, iso)) {
+      const status = recurrenceRecordFor(item, iso)?.status;
+      if (status === "skipped") {
+        cursor = addDays(cursor, -1);
+        continue;
+      }
+      if (status !== "done") break;
+      streak += 1;
+    }
+    cursor = addDays(cursor, -1);
+  }
+  return streak;
+}
+
+function recurrenceDueDates(item, startIso, endIso) {
+  const dates = [];
+  let cursor = parseISODate(maxISODate(startIso, item.startDate));
+  const end = parseISODate(endIso);
+  while (cursor <= end) {
+    const iso = toISODate(cursor);
+    if (isRecurrenceDueOn(item, iso)) dates.push(iso);
+    cursor = addDays(cursor, 1);
+  }
+  return dates;
+}
+
+function defaultRecurrenceSummaryRange(item) {
+  const today = toISODate(new Date());
+  return {
+    start: isISODate(item.startDate) ? item.startDate : today,
+    end: item.endDate && item.endDate < today ? item.endDate : today,
+  };
+}
+
+function recurrenceRangeFor(item) {
+  const defaults = defaultRecurrenceSummaryRange(item);
+  const custom = state.recurrenceSummaryRanges[item.id] || {};
+  let start = isISODate(custom.start) ? custom.start : defaults.start;
+  let end = isISODate(custom.end) ? custom.end : defaults.end;
+  if (start > end) [start, end] = [end, start];
+  return { start, end };
+}
+
+function setRecurrenceSummaryRange(id, updates) {
+  const current = state.recurrenceSummaryRanges[id] || {};
+  state.recurrenceSummaryRanges = {
+    ...state.recurrenceSummaryRanges,
+    [id]: {
+      ...current,
+      ...updates,
+    },
+  };
+}
+
+function monthsBetween(startDate, endDate) {
+  return (endDate.getFullYear() - startDate.getFullYear()) * 12 + endDate.getMonth() - startDate.getMonth();
+}
+
+function recurrenceFrequencyText(item) {
+  const frequency = normalizeRecurrenceFrequency(item.frequency);
+  if (frequency.type === "weekly") return `每周${"一二三四五六日"[frequency.weekday - 1]}`;
+  if (frequency.type === "interval") return `每隔 ${frequency.everyDays} 天`;
+  if (frequency.type === "monthly") return `每月 ${frequency.monthDay} 日`;
+  return recurrenceFrequencyLabels[frequency.type] || "每天";
+}
+
+function sortedShoppingCategories() {
+  return [...state.shopping.categories].sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name, "zh-CN"));
+}
+
+function shoppingTabLabel(label, count) {
+  return `${label} ${count}`;
+}
+
+function shoppingCategoryProductCount(categoryId) {
+  return state.shopping.products.filter((product) => product.categoryId === categoryId).length;
+}
+
+function shoppingSubcategoryProductCount(subcategoryId) {
+  return state.shopping.products.filter((product) => product.subcategoryId === subcategoryId).length;
+}
+
+function shoppingSubcategoriesFor(categoryId) {
+  return state.shopping.subcategories
+    .filter((subcategory) => subcategory.categoryId === categoryId)
+    .sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name, "zh-CN"));
+}
+
+function shoppingVisibleProducts() {
+  const keyword = state.shoppingSearch.trim().toLowerCase();
+  let products = state.shopping.products;
+  if (keyword) {
+    products = products.filter((product) => shoppingProductMatches(product, keyword));
+  } else {
+    if (state.shoppingCategoryId !== "all") {
+      products = products.filter((product) => product.categoryId === state.shoppingCategoryId);
+    }
+    if (state.shoppingSubcategoryId !== "all") {
+      products = products.filter((product) => product.subcategoryId === state.shoppingSubcategoryId);
+    }
+  }
+  return sortShoppingProducts(products);
+}
+
+function sortShoppingProducts(products) {
+  const sorted = [...products];
+  if (state.shoppingSort === "name") return sorted.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+  return sorted.sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name, "zh-CN"));
+}
+
+function shoppingProductMatches(product, keyword) {
+  const recordText = product.records.map((record) => `${record.platform} ${record.note || ""}`).join(" ");
+  const path = shoppingProductPath(product);
+  return `${product.name} ${path} ${recordText}`.toLowerCase().includes(keyword);
+}
+
+function shoppingProductPath(product) {
+  const category = shoppingCategoryById(product.categoryId)?.name || "未分类";
+  const subcategory = product.subcategoryId ? shoppingSubcategoryById(product.subcategoryId)?.name : "";
+  return subcategory ? `${category} > ${subcategory}` : category;
+}
+
+function shoppingBestPriceText(product) {
+  const best = shoppingBestRecord(product);
+  if (!best) return "暂无价格记录";
+  const unit = product.unit ? `/${product.unit}` : "";
+  return `最低：${best.record.platform} ${formatUnitPrice(best.unitPrice)} 元${unit}`;
+}
+
+function shoppingBestRecord(product) {
+  return product.records
+    .map((record) => ({ record, unitPrice: shoppingUnitPrice(record) }))
+    .filter((item) => Number.isFinite(item.unitPrice))
+    .sort((a, b) => a.unitPrice - b.unitPrice || a.record.date.localeCompare(b.record.date))[0] || null;
+}
+
+function shoppingUnitPrice(record) {
+  const quantity = Number(record.quantity);
+  if (!Number.isFinite(quantity) || quantity <= 0) return null;
+  return Number(record.totalPrice) / quantity;
+}
+
+function sortedShoppingRecords(product) {
+  return [...product.records].sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || "").localeCompare(a.createdAt || ""));
+}
+
+function shoppingCategoryById(id) {
+  return state.shopping.categories.find((category) => category.id === id) || null;
+}
+
+function shoppingSubcategoryById(id) {
+  return state.shopping.subcategories.find((subcategory) => subcategory.id === id) || null;
+}
+
+function shoppingProductById(id) {
+  return state.shopping.products.find((product) => product.id === id) || null;
+}
+
+function nextShoppingCategoryOrder() {
+  return Math.max(0, ...state.shopping.categories.map((category) => category.order || 0)) + 1;
+}
+
+function nextShoppingSubcategoryOrder(categoryId) {
+  return Math.max(0, ...shoppingSubcategoriesFor(categoryId).map((subcategory) => subcategory.order || 0)) + 1;
+}
+
+function nextShoppingProductOrder() {
+  return Math.max(0, ...state.shopping.products.map((product) => product.order || 0)) + 1;
+}
+
+function normalizeMoneyInput(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return null;
+  return roundMoney(number);
+}
+
+function roundMoney(value) {
+  return Math.round(Number(value) * 100) / 100;
+}
+
+function formatMoney(value) {
+  return roundMoney(value).toFixed(2);
+}
+
+function formatQuantity(value) {
+  const rounded = roundMoney(value);
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2);
+}
+
+function formatUnitPrice(value) {
+  if (!Number.isFinite(value)) return "0.00";
+  if (value > 0 && value < 0.01) return value.toFixed(4);
+  return roundMoney(value).toFixed(2);
 }
 
 function taskEntry(task) {
@@ -3861,6 +5697,8 @@ function createMediumGoal(title) {
     done: false,
     canceled: false,
     cancelReason: "",
+    note: "",
+    checklist: [],
     order: nextOrder(),
     createdAt: new Date().toISOString(),
     completedAt: null,
@@ -3888,6 +5726,8 @@ function createBirthdayGoal(birthday, occurrence, orderOffset = 0) {
     done: false,
     canceled: false,
     cancelReason: "",
+    note: "",
+    checklist: [],
     order,
     createdAt: new Date().toISOString(),
     completedAt: null,
@@ -3907,6 +5747,8 @@ function createBirthdayNode(title, date, priority, order) {
     date,
     priority,
     done: false,
+    note: "",
+    checklist: [],
     order,
     createdAt: new Date().toISOString(),
     completedAt: null,
@@ -3947,8 +5789,10 @@ async function exportTasks() {
           exportedAt: exportedAt.toISOString(),
           tasks: state.tasks,
           birthdays: state.birthdays,
+          recurrences: state.recurrences,
           english: state.english,
           knowledge: state.knowledge,
+          shopping: state.shopping,
         },
         null,
         2,
@@ -3996,7 +5840,7 @@ function importTasks(event) {
   const file = event.target.files?.[0];
   if (!file) return;
 
-  const shouldImport = confirm("导入备份会覆盖当前任务、生日、英语学习和知识文库数据。建议先确认当前数据已经导出到坚果云。继续导入吗？");
+  const shouldImport = confirm("导入备份会覆盖当前任务、生日、周期、英语学习、知识文库和商品比价数据。建议先确认当前数据已经导出到坚果云。继续导入吗？");
   if (!shouldImport) {
     event.target.value = "";
     return;
@@ -4010,12 +5854,16 @@ function importTasks(event) {
       saveImportBackup();
       state.tasks = normalizeTasks(parsed.tasks).filter((task) => task.title && typeof task.title === "string");
       state.birthdays = normalizeBirthdays(parsed.birthdays);
+      state.recurrences = parsed.recurrences ? normalizeRecurrences(parsed.recurrences) : state.recurrences;
       state.english = normalizeEnglish(parsed.english);
       state.knowledge = parsed.knowledge ? normalizeKnowledge(parsed.knowledge) : state.knowledge;
+      state.shopping = parsed.shopping ? normalizeShopping(parsed.shopping) : state.shopping;
       saveTasks();
       saveBirthdays();
+      saveRecurrences();
       saveEnglish();
       saveKnowledge();
+      saveShopping();
       renderBackupState();
       render();
       showBackupStatus(`已导入：${file.name}`);
@@ -4036,8 +5884,10 @@ function saveImportBackup() {
       savedAt: new Date().toISOString(),
       tasks: state.tasks,
       birthdays: state.birthdays,
+      recurrences: state.recurrences,
       english: state.english,
       knowledge: state.knowledge,
+      shopping: state.shopping,
     }),
   );
 }
@@ -4045,7 +5895,7 @@ function saveImportBackup() {
 function restoreImportBackup() {
   const raw = readImportBackup();
   if (!raw) return;
-  const shouldRestore = confirm("这会用最近一次导入前的本机数据覆盖当前任务、生日、英语学习和知识文库数据。继续恢复吗？");
+  const shouldRestore = confirm("这会用最近一次导入前的本机数据覆盖当前任务、生日、周期、英语学习、知识文库和商品比价数据。继续恢复吗？");
   if (!shouldRestore) return;
 
   try {
@@ -4053,12 +5903,16 @@ function restoreImportBackup() {
     if (!Array.isArray(parsed.tasks)) throw new Error("Invalid backup");
     state.tasks = normalizeTasks(parsed.tasks).filter((task) => task.title && typeof task.title === "string");
     state.birthdays = normalizeBirthdays(parsed.birthdays);
+    state.recurrences = parsed.recurrences ? normalizeRecurrences(parsed.recurrences) : state.recurrences;
     state.english = normalizeEnglish(parsed.english);
     state.knowledge = parsed.knowledge ? normalizeKnowledge(parsed.knowledge) : state.knowledge;
+    state.shopping = parsed.shopping ? normalizeShopping(parsed.shopping) : state.shopping;
     saveTasks();
     saveBirthdays();
+    saveRecurrences();
     saveEnglish();
     saveKnowledge();
+    saveShopping();
     render();
     showBackupStatus("已恢复数据");
   } catch {
@@ -4115,6 +5969,16 @@ function loadBirthdays() {
   }
 }
 
+function loadRecurrences() {
+  try {
+    const raw = localStorage.getItem(recurrenceStorageKey);
+    if (raw) return normalizeRecurrences(JSON.parse(raw));
+    return { items: [] };
+  } catch {
+    return { items: [] };
+  }
+}
+
 function loadEnglish() {
   try {
     const raw = localStorage.getItem(englishStorageKey);
@@ -4132,6 +5996,16 @@ function loadKnowledge() {
     return normalizeKnowledge();
   } catch {
     return normalizeKnowledge();
+  }
+}
+
+function loadShopping() {
+  try {
+    const raw = localStorage.getItem(shoppingStorageKey);
+    if (raw) return normalizeShopping(JSON.parse(raw));
+    return normalizeShopping();
+  } catch {
+    return normalizeShopping();
   }
 }
 
@@ -4170,6 +6044,155 @@ function normalizeBirthdays(birthdays) {
         reminderDates: Array.isArray(birthday.reminderDates) ? birthday.reminderDates.filter(Boolean) : [],
         createdAt: birthday.createdAt || new Date().toISOString(),
         updatedAt: birthday.updatedAt || null,
+      };
+    });
+}
+
+function normalizeRecurrences(recurrences = {}) {
+  const source = Array.isArray(recurrences) ? recurrences : recurrences.items;
+  const items = Array.isArray(source)
+    ? source
+        .filter((item) => item?.title && typeof item.title === "string")
+        .map((item, index) => {
+          const startDate = isISODate(item.startDate) ? item.startDate : toISODate(new Date());
+          return {
+            ...item,
+            id: item.id || createId(),
+            title: item.title,
+            frequency: normalizeRecurrenceFrequency(item.frequency),
+            startDate,
+            endDate: isISODate(item.endDate) ? item.endDate : null,
+            active: item.active !== false,
+            priority: normalizePriority(item.priority),
+            note: typeof item.note === "string" ? item.note : "",
+            checklist: normalizeChecklist(item.checklist),
+            order: normalizeNonNegativeInteger(item.order) || index + 1,
+            records: normalizeRecurrenceRecords(item.records, startDate),
+            createdAt: item.createdAt || new Date().toISOString(),
+            updatedAt: item.updatedAt || null,
+          };
+        })
+    : [];
+  return { items };
+}
+
+function normalizeRecurrenceFrequency(frequency = {}) {
+  const type = ["daily", "weekly", "interval", "monthly"].includes(frequency.type) ? frequency.type : "daily";
+  if (type === "weekly") {
+    return {
+      type,
+      weekday: clampInteger(frequency.weekday, 1, 7, 1),
+    };
+  }
+  if (type === "interval") {
+    return {
+      type,
+      everyDays: clampInteger(frequency.everyDays, 2, 365, 2),
+    };
+  }
+  if (type === "monthly") {
+    return {
+      type,
+      monthDay: clampInteger(frequency.monthDay, 1, 31, 1),
+    };
+  }
+  return { type: "daily" };
+}
+
+function normalizeRecurrenceRecords(records, startDate) {
+  if (!records || typeof records !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(records)
+      .filter(([iso, record]) => isISODate(iso) && iso >= startDate && ["done", "missed", "skipped"].includes(record?.status))
+      .map(([iso, record]) => [
+        iso,
+        {
+          status: record.status,
+          note: typeof record.note === "string" ? record.note : "",
+          updatedAt: record.updatedAt || null,
+        },
+      ]),
+  );
+}
+
+function normalizeShopping(shopping = {}) {
+  const now = new Date().toISOString();
+  const categories = normalizeShoppingCategories(shopping.categories, now);
+  const categoryIds = new Set(categories.map((category) => category.id));
+  const subcategories = normalizeShoppingSubcategories(shopping.subcategories, categoryIds, now);
+  const subcategoryIds = new Set(subcategories.map((subcategory) => subcategory.id));
+  return {
+    categories,
+    subcategories,
+    products: normalizeShoppingProducts(shopping.products, categoryIds, subcategoryIds, now),
+  };
+}
+
+function normalizeShoppingCategories(categories, now) {
+  if (!Array.isArray(categories)) return [];
+  return categories
+    .filter((category) => category?.id && category?.name)
+    .map((category, index) => ({
+      id: String(category.id),
+      name: String(category.name),
+      order: normalizeNonNegativeInteger(category.order) || index + 1,
+      createdAt: category.createdAt || now,
+      updatedAt: category.updatedAt || null,
+    }));
+}
+
+function normalizeShoppingSubcategories(subcategories, categoryIds, now) {
+  if (!Array.isArray(subcategories)) return [];
+  return subcategories
+    .filter((subcategory) => subcategory?.id && subcategory?.name && categoryIds.has(String(subcategory.categoryId)))
+    .map((subcategory, index) => ({
+      id: String(subcategory.id),
+      categoryId: String(subcategory.categoryId),
+      name: String(subcategory.name),
+      order: normalizeNonNegativeInteger(subcategory.order) || index + 1,
+      createdAt: subcategory.createdAt || now,
+      updatedAt: subcategory.updatedAt || null,
+    }));
+}
+
+function normalizeShoppingProducts(products, categoryIds, subcategoryIds, now) {
+  if (!Array.isArray(products)) return [];
+  return products
+    .filter((product) => product?.id && product?.name && categoryIds.has(String(product.categoryId)))
+    .map((product, index) => {
+      const subcategoryId = product.subcategoryId && subcategoryIds.has(String(product.subcategoryId))
+        ? String(product.subcategoryId)
+        : null;
+      return {
+        id: String(product.id),
+        name: String(product.name),
+        categoryId: String(product.categoryId),
+        subcategoryId,
+        unit: typeof product.unit === "string" ? product.unit : "",
+        order: normalizeNonNegativeInteger(product.order) || index + 1,
+        records: normalizeShoppingRecords(product.records, now),
+        createdAt: product.createdAt || now,
+        updatedAt: product.updatedAt || null,
+      };
+    });
+}
+
+function normalizeShoppingRecords(records, now) {
+  if (!Array.isArray(records)) return [];
+  return records
+    .filter((record) => record?.id && isISODate(record.date) && record.platform)
+    .map((record) => {
+      const totalPrice = normalizeMoneyInput(record.totalPrice);
+      const quantity = normalizeMoneyInput(record.quantity);
+      return {
+        id: String(record.id),
+        date: record.date,
+        platform: String(record.platform),
+        totalPrice: totalPrice ?? 0,
+        quantity: quantity && quantity > 0 ? quantity : 1,
+        note: typeof record.note === "string" ? record.note : "",
+        createdAt: record.createdAt || now,
+        updatedAt: record.updatedAt || null,
       };
     });
 }
@@ -4315,6 +6338,8 @@ function normalizeTask(task) {
     done: Boolean(task.done),
     canceled: Boolean(task.canceled),
     cancelReason: typeof task.cancelReason === "string" ? task.cancelReason : "",
+    note: typeof task.note === "string" ? task.note : "",
+    checklist: normalizeChecklist(task.checklist),
     order: normalizeOrder(task),
     createdAt: task.createdAt || new Date().toISOString(),
     completedAt: task.completedAt || null,
@@ -4334,12 +6359,27 @@ function normalizeChildren(children) {
           done: Boolean(child.done),
           canceled: false,
           cancelReason: "",
+          note: typeof child.note === "string" ? child.note : "",
+          checklist: normalizeChecklist(child.checklist),
           order: normalizeOrder(child),
           createdAt: child.createdAt || new Date().toISOString(),
           completedAt: child.completedAt || null,
           canceledAt: null,
         }))
     : [];
+}
+
+function normalizeChecklist(checklist) {
+  if (!Array.isArray(checklist)) return [];
+  return checklist
+    .filter((item) => typeof item?.text === "string" && item.text.trim())
+    .map((item) => ({
+      id: item.id || createId(),
+      text: item.text.trim(),
+      done: Boolean(item.done),
+      createdAt: item.createdAt || new Date().toISOString(),
+      completedAt: item.done ? item.completedAt || new Date().toISOString() : null,
+    }));
 }
 
 function normalizePriority(priority) {
@@ -4355,12 +6395,20 @@ function saveBirthdays() {
   localStorage.setItem(birthdayStorageKey, JSON.stringify(state.birthdays));
 }
 
+function saveRecurrences() {
+  localStorage.setItem(recurrenceStorageKey, JSON.stringify(state.recurrences));
+}
+
 function saveEnglish() {
   localStorage.setItem(englishStorageKey, JSON.stringify(state.english));
 }
 
 function saveKnowledge() {
   localStorage.setItem(knowledgeStorageKey, JSON.stringify(state.knowledge));
+}
+
+function saveShopping() {
+  localStorage.setItem(shoppingStorageKey, JSON.stringify(state.shopping));
 }
 
 function rolloverOpenScheduleTasks() {
@@ -4374,6 +6422,32 @@ function rolloverOpenScheduleTasks() {
   });
 
   if (changed) saveTasks();
+}
+
+function markMissedRecurrences() {
+  const today = toISODate(new Date());
+  const yesterday = toISODate(addDays(parseISODate(today), -1));
+  let changed = false;
+
+  state.recurrences.items = state.recurrences.items.map((item) => {
+    if (!item.active && !item.endDate) return item;
+    const end = item.endDate && item.endDate < yesterday ? item.endDate : yesterday;
+    if (end < item.startDate) return item;
+
+    const records = { ...item.records };
+    recurrenceDueDates(item, item.startDate, end).forEach((iso) => {
+      if (records[iso]) return;
+      records[iso] = {
+        status: "missed",
+        note: "",
+        updatedAt: new Date().toISOString(),
+      };
+      changed = true;
+    });
+    return changed ? { ...item, records } : item;
+  });
+
+  if (changed) saveRecurrences();
 }
 
 function syncBirthdayReminders() {
@@ -4405,6 +6479,7 @@ function nextOrder() {
   const orders = [
     ...state.tasks.map((task) => task.order || 0),
     ...state.tasks.flatMap((task) => (Array.isArray(task.children) ? task.children.map((child) => child.order || 0) : [])),
+    ...state.recurrences.items.map((item) => item.order || 0),
   ];
   return Math.max(0, ...orders) + 1;
 }
@@ -4430,6 +6505,8 @@ function seedTasks() {
       done: false,
       canceled: false,
       cancelReason: "",
+      note: "",
+      checklist: [],
       order: now,
       createdAt: new Date().toISOString(),
       completedAt: null,
@@ -4446,6 +6523,8 @@ function seedTasks() {
       done: false,
       canceled: false,
       cancelReason: "",
+      note: "",
+      checklist: [],
       order: now + 1,
       createdAt: new Date().toISOString(),
       completedAt: null,
@@ -4462,6 +6541,8 @@ function seedTasks() {
       done: false,
       canceled: false,
       cancelReason: "",
+      note: "",
+      checklist: [],
       order: now + 2,
       createdAt: new Date().toISOString(),
       completedAt: null,
@@ -4472,7 +6553,7 @@ function seedTasks() {
 
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js?v=50").catch(() => {});
+    navigator.serviceWorker.register("./sw.js?v=63").catch(() => {});
   }
 }
 
@@ -4516,6 +6597,14 @@ function parseISODate(value) {
   return new Date(year, month - 1, day);
 }
 
+function isISODate(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && toISODate(parseISODate(value)) === value;
+}
+
+function isoWeekday(date) {
+  return date.getDay() || 7;
+}
+
 function formatFileStamp(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -4546,7 +6635,12 @@ function formatWeekday(date) {
 }
 
 function formatTaskDate(value) {
-  return formatShortDate(parseISODate(value));
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    weekday: "short",
+  }).format(parseISODate(value));
 }
 
 function formatOptionalDate(date, fallback) {
@@ -4565,11 +6659,6 @@ function formatBirthdayDate(birthday) {
 function formatDaysUntil(days) {
   if (days === 0) return "今天生日";
   return `还有 ${days} 天`;
-}
-
-function sameDate(value, isoDate) {
-  if (!value) return false;
-  return toISODate(new Date(value)) === isoDate;
 }
 
 function nextBirthdayOccurrence(birthday, fromIso) {

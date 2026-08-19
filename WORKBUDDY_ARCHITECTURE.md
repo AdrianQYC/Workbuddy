@@ -35,8 +35,10 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 
 - `workbuddy.tasks.v1`：每日计划任务、日程任务、中期目标和节点任务。
 - `workbuddy.birthdays.v1`：生日记录。
+- `workbuddy.recurrences.v1`：周期任务规则、每日完成/未完成/跳过记录和复盘数据。
 - `workbuddy.english.v1`：每日英语学习进度、备注、复习次数、词组。
 - `workbuddy.knowledge.v1`：知识文库分类、文档、回收站。
+- `workbuddy.shopping.v1`：商品比价分类、商品、数量单位和购买记录。
 - `workbuddy.import-backup.v1`：导入备份前的本机恢复点。
 
 注意：Chrome 会按访问地址隔离数据。以下地址不是同一份数据：
@@ -55,6 +57,7 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - `planner`：每日计划
 - `english`：每日英语
 - `knowledge`：知识文库
+- `shopping`：商品比价
 
 新增模块时应遵循：
 
@@ -63,6 +66,7 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - 为模块建立独立的视图状态，例如 `xxxView`。
 - 在 `renderModules()`、模块按钮、模块内部 segments、`currentViewTitle()`、`currentViewMeta()` 中接入。
 - 全局备份导出/导入/恢复要同步接入，但旧备份缺少新模块数据时不能清空当前新模块数据。
+- 手动排序优先接入通用 `setupSortableElement()`，用 `☰` 拖动按钮或明确的标签拖动区触发，不要再新增上下箭头式排序逻辑。
 
 ## 渲染入口
 
@@ -81,6 +85,7 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 
 - `state.module === "english"` 时调用 `renderEnglishShell()`。
 - `state.module === "knowledge"` 时调用 `renderKnowledgeShell()`。
+- `state.module === "shopping"` 时调用 `renderShoppingShell()`。
 - 其它情况才走每日计划任务列表。
 
 ## 每日计划
@@ -90,6 +95,7 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - 今天
 - 日程
 - 中期
+- 周期
 - 生日
 - 搜索
 
@@ -99,8 +105,17 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - 中期目标按母任务计数，不按子任务计数。
 - 中期子任务全完成后，母任务完成。
 - 点击母任务完成按钮时，应一键完成母任务和全部子任务。
+- 中期节点显示和“下一个节点”按节点日期升序；无日期节点排在有日期节点后面，同日期再按 `order` 排序。
 - 普通过期日程任务会顺延到今天。
 - 已取消一次性日程任务保留原日期和取消原因，不再顺延。
+- 普通任务、中期目标、节点任务和周期任务都可以带 `note` 与 `checklist`；生日继续使用生日模块自己的 `note` 字段，不走通用备注面板。
+- 通用 `checklist` 是结构化数组，清单勾选不自动完成任务，任务完成也不自动勾选清单。
+- 周期任务使用独立数据键 `workbuddy.recurrences.v1`，不要混入 `workbuddy.tasks.v1`。
+- 周期任务显示在“今天”页的周期分区，但不计入日程统计和总完成。
+- 周期页单独统计完成、未完成、跳过记录，周期卡片默认显示该任务从开始到今天的总计。
+- 每个周期卡片展开后可独立选择起止日期，并按原始日期记录临时计算该时间段总结；长时间段只显示最后 12 个月日历。
+- 打开 Workbuddy 时，过去该做但没有记录的周期日期补记为未完成；当天只显示待完成，不提前算失败。
+- 周期页支持按住 `☰` 拖动排序，“今天”页周期分区继承周期页顺序。
 
 改动每日计划时，重点检查：
 
@@ -109,6 +124,12 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - `todayEntries()`
 - `scheduleEntries()`
 - `mediumEntries()`
+- `todayRecurrenceEntries()`
+- `renderTodayRecurrences()`
+- `renderRecurrenceList()`
+- `isRecurrenceDueOn()`
+- `markMissedRecurrences()`
+- `recurrencePeriodStats()`
 - `searchResults()`
 - `unitCompletionStats()`
 - `goalCompletionStats()`
@@ -192,6 +213,35 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - `saveKnowledge()`
 - 知识文库拖拽排序相关函数
 
+## 商品比价
+
+商品比价用于手动记录购物收藏、平台购买记录和单价比较。
+
+关键规则：
+
+- 使用独立数据键 `workbuddy.shopping.v1`，不要混入任务、英语或知识文库数据。
+- 购物数据只来自用户手动填写，不接入购物平台账号，不做自动抓取。
+- 分类是两级结构：一级分类保存在 `categories`，二级分类保存在 `subcategories`，商品通过 `categoryId` 和可空的 `subcategoryId` 归类。
+- 商品的数量单位保存在商品层级，购买记录只保存日期、平台、总价、数量和备注。
+- 单价不单独保存，渲染时用 `totalPrice / quantity` 临时计算。
+- 总价默认单位为元；数量单位是自由文本，用户不填写时不显示 `/单位`。
+- 商品支持手动拖动排序；一级分类和二级分类标签也支持拖动排序，二级分类只在所属一级分类内排序。
+- 旧备份没有 `shopping` 字段时，导入和恢复都应保留当前本机购物数据，不能清空。
+
+改动商品比价时，重点检查：
+
+- `renderShoppingShell()`
+- `createShoppingCategoryTabs()`
+- `createShoppingSubcategoryTabs()`
+- `createShoppingProductForm()`
+- `createShoppingProductCard()`
+- `createShoppingRecordForm()`
+- `createShoppingRecordRow()`
+- `shoppingVisibleProducts()`
+- `shoppingBestRecord()`
+- `normalizeShopping()`
+- `saveShopping()`
+
 ## 本地启动逻辑
 
 桌面 `Workbuddy` 快捷方式目标是：
@@ -235,14 +285,14 @@ C:\Users\qyc22\Documents\菜单\Workbuddy\关闭Workbuddy服务.cmd
 `index.html` 中 CSS/JS 使用查询参数版本号，例如：
 
 ```html
-./styles.css?v=38
-./app.js?v=38
+./styles.css?v=63
+./app.js?v=63
 ```
 
 `sw.js` 中也有缓存名，例如：
 
 ```js
-const cacheName = "workbuddy-v38";
+const cacheName = "workbuddy-v63";
 ```
 
 每次修改前端文件后，通常需要同步提升版本号，避免 Chrome 桌面版混用旧缓存。

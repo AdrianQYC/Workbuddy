@@ -594,8 +594,8 @@ select:focus {
 }
 
 .birthday-panel .select-field {
-  flex: 0 1 118px;
-  min-width: 118px;
+  flex: 0 1 142px;
+  min-width: 142px;
 }
 
 .leap-field {
@@ -722,10 +722,320 @@ select:focus {
   background: #fbfcfb;
 }
 
-.task-list.is-reorderable .task-item,
-.task-list.is-reorderable .goal-card,
-.task-list.is-reorderable .node-item {
-  cursor: grab;
+.recurrence-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.recurrence-form,
+.recurrence-summary-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: stretch;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbfa;
+}
+
+.recurrence-form > input {
+  flex: 1 1 220px;
+}
+
+.recurrence-form .select-field {
+  flex: 0 1 142px;
+}
+
+.recurrence-form .date-field {
+  flex: 0 1 170px;
+}
+
+.recurrence-form .primary-button {
+  flex: 0 0 auto;
+}
+
+.recurrence-extra[hidden] {
+  display: none;
+}
+
+.recurrence-summary-controls {
+  justify-content: flex-end;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.recurrence-summary-controls .date-field {
+  flex: 0 1 170px;
+}
+
+.recurrence-summary-controls .cancel-button {
+  flex: 0 0 auto;
+}
+
+.recurrence-list {
+  display: grid;
+  gap: 10px;
+}
+
+.recurrence-card,
+.recurrence-today-card,
+.recurrence-empty-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.recurrence-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.recurrence-card.priority-high,
+.recurrence-today-card.priority-high {
+  border-color: var(--priority-high-line);
+  background: var(--priority-high);
+}
+
+.recurrence-card.priority-urgent,
+.recurrence-today-card.priority-urgent {
+  border-color: var(--priority-urgent-line);
+  background: var(--priority-urgent);
+}
+
+.recurrence-card.is-inactive {
+  border-color: var(--canceled-line);
+  background: var(--canceled-bg);
+  opacity: 0.86;
+}
+
+.recurrence-card-head,
+.recurrence-today-card,
+.recurrence-today-main {
+  display: grid;
+  gap: 12px;
+  align-items: center;
+}
+
+.recurrence-card-head {
+  grid-template-columns: 1fr auto;
+}
+
+.recurrence-today-card {
+  grid-template-columns: 1fr auto;
+  padding: 12px;
+}
+
+.recurrence-today-main {
+  grid-template-columns: 34px 1fr;
+}
+
+.recurrence-today-card.is-done {
+  border-color: var(--done-line);
+  background: var(--done-bg);
+}
+
+.recurrence-today-card.is-skipped {
+  border-color: var(--canceled-line);
+  background: #f3f0e9;
+}
+
+.recurrence-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.recurrence-title-row h3 {
+  overflow-wrap: anywhere;
+  font-size: 16px;
+}
+
+.recurrence-state-pill {
+  display: inline-grid;
+  min-height: 24px;
+  place-items: center;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.recurrence-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.recurrence-stats span {
+  min-height: 28px;
+  padding: 5px 8px;
+  border: 1px solid rgba(20, 32, 29, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.68);
+  color: #40514c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.recurrence-day {
+  display: grid;
+  min-width: 0;
+  min-height: 34px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f5f8f7;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.recurrence-day span,
+.recurrence-day strong {
+  display: block;
+  line-height: 1.05;
+}
+
+.recurrence-day strong {
+  margin-top: 3px;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.recurrence-day.is-done {
+  border-color: var(--done-line);
+  background: var(--done-bg);
+  color: #255a3c;
+}
+
+.recurrence-day.is-missed {
+  border-color: var(--priority-urgent-line);
+  background: var(--priority-urgent);
+  color: #743536;
+}
+
+.recurrence-day.is-skipped {
+  border-color: var(--canceled-line);
+  background: var(--canceled-bg);
+  color: #665d51;
+}
+
+.recurrence-day.is-open {
+  border-color: #82b8d6;
+  background: #e8f3f8;
+  color: #28617c;
+}
+
+.recurrence-day.is-none {
+  background: #f4f6f5;
+  color: #a4aaa8;
+}
+
+.recurrence-day.is-today {
+  box-shadow: inset 0 0 0 2px rgba(31, 138, 112, 0.28);
+}
+
+.recurrence-day:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.recurrence-day:not(:disabled):hover {
+  border-color: var(--accent);
+}
+
+.recurrence-calendar-range {
+  display: grid;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.recurrence-calendar-note {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbfa;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.recurrence-month {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(20, 32, 29, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.54);
+}
+
+.recurrence-month-title {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.recurrence-month-weekdays,
+.recurrence-month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.recurrence-month-weekdays span {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.recurrence-month-grid .recurrence-day {
+  min-height: 32px;
+  padding: 0;
+}
+
+.recurrence-month-grid .recurrence-day.is-muted {
+  opacity: 0.42;
+}
+
+.recurrence-today-section {
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.recurrence-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 2px 0;
+}
+
+.recurrence-section-heading h3 {
+  font-size: 15px;
+}
+
+.recurrence-section-heading span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.recurrence-today-list {
+  display: grid;
+  gap: 8px;
+}
+
+.recurrence-empty-card {
+  padding: 14px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .english-shell {
@@ -738,6 +1048,11 @@ select:focus {
   gap: 12px;
 }
 
+.shopping-shell {
+  display: grid;
+  gap: 12px;
+}
+
 .english-panel,
 .knowledge-panel {
   display: grid;
@@ -746,6 +1061,199 @@ select:focus {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
+}
+
+.shopping-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.shopping-category-bar,
+.shopping-controls,
+.shopping-product-form,
+.shopping-unit-form,
+.shopping-record-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.shopping-tabs {
+  display: flex;
+  flex: 1 1 260px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.shopping-tab-wrap {
+  display: inline-flex;
+  min-height: 38px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.shopping-tab-wrap.is-active {
+  border-color: var(--accent);
+  background: var(--panel-soft);
+}
+
+.shopping-tab {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.shopping-tab-actions {
+  display: inline-flex;
+  border-left: 1px solid var(--line);
+}
+
+.shopping-tab-actions button {
+  width: 28px;
+  min-height: 36px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.shopping-tab-actions button:hover {
+  color: var(--accent-dark);
+}
+
+.shopping-inline-form {
+  display: flex;
+  flex: 0 1 260px;
+  gap: 8px;
+}
+
+.shopping-inline-form input {
+  flex: 1 1 auto;
+}
+
+.shopping-inline-note {
+  display: grid;
+  min-height: 42px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.shopping-controls > input,
+.shopping-product-form > input,
+.shopping-record-form > input {
+  flex: 1 1 160px;
+}
+
+.shopping-controls .select-field,
+.shopping-product-form .select-field,
+.shopping-record-form .date-field,
+.shopping-unit-form .date-field {
+  flex: 0 1 150px;
+}
+
+.shopping-product-form .primary-button,
+.shopping-record-form .primary-button {
+  flex: 0 0 auto;
+}
+
+.shopping-product-list,
+.shopping-record-list,
+.shopping-search-results {
+  display: grid;
+  gap: 8px;
+}
+
+.shopping-product-card,
+.shopping-empty-card,
+.shopping-search-row {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.shopping-product-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.shopping-product-card.is-highlighted {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(31, 138, 112, 0.12);
+}
+
+.shopping-product-head,
+.shopping-record-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.shopping-product-head h3 {
+  overflow-wrap: anywhere;
+  font-size: 16px;
+}
+
+.shopping-product-detail {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.shopping-record-row {
+  padding: 10px;
+  border: 1px solid rgba(20, 32, 29, 0.08);
+  border-radius: 8px;
+  background: #f8fbfa;
+}
+
+.shopping-record-row span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.shopping-search-row {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  color: var(--ink);
+  text-align: left;
+}
+
+.shopping-search-row:hover {
+  border-color: var(--accent);
+}
+
+.shopping-search-row span,
+.shopping-subheading {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.shopping-subheading {
+  font-weight: 800;
+}
+
+.shopping-empty-card {
+  padding: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .word-preview-card,
@@ -1375,13 +1883,8 @@ select:focus {
   font-size: 13px;
 }
 
-.task-list.is-reorderable .task-item:active,
-.task-list.is-reorderable .goal-card:active,
-.task-list.is-reorderable .node-item:active {
-  cursor: grabbing;
-}
-
 .is-dragging {
+  cursor: grabbing;
   opacity: 0.55;
 }
 
@@ -1521,6 +2024,149 @@ select:focus {
   margin-top: 5px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.detail-toggle-button {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.detail-toggle-button.has-detail {
+  border-color: rgba(35, 96, 76, 0.28);
+  background: #f2f8f5;
+  color: var(--accent-dark);
+}
+
+.detail-toggle-button.is-active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.detail-summary {
+  display: block;
+  max-width: 100%;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.detail-summary:hover {
+  color: var(--accent-dark);
+}
+
+.planner-detail-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid rgba(20, 32, 29, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.planner-detail-header,
+.planner-checklist-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.detail-checklist-add {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(35, 96, 76, 0.22);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--accent-dark);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.planner-detail-note {
+  width: 100%;
+  min-height: 76px;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.5;
+}
+
+.planner-checklist-add-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.planner-checklist-add-form[hidden] {
+  display: none;
+}
+
+.planner-checklist-add-form input {
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+
+.planner-checklist-add-form .save-button {
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.planner-checklist {
+  display: grid;
+  gap: 6px;
+}
+
+.planner-checklist-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 30px;
+  gap: 8px;
+  align-items: center;
+}
+
+.planner-checklist-row > input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+
+.planner-checklist-row > input[type="text"] {
+  min-width: 0;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+
+.planner-checklist-row.is-done > input[type="text"] {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.checklist-remove {
+  width: 30px;
+  height: 30px;
 }
 
 .cancel-reason {
@@ -2027,7 +2673,15 @@ select:focus {
   .english-group-form,
   .knowledge-controls,
   .knowledge-inline-form,
-  .knowledge-form-actions {
+  .knowledge-form-actions,
+  .recurrence-form,
+  .recurrence-summary-controls,
+  .shopping-category-bar,
+  .shopping-controls,
+  .shopping-product-form,
+  .shopping-unit-form,
+  .shopping-record-form,
+  .shopping-inline-form {
     flex-direction: column;
   }
 
@@ -2035,7 +2689,21 @@ select:focus {
   .english-group-form > input,
   .english-bank-select,
   .knowledge-controls > input,
-  .knowledge-inline-form > input {
+  .knowledge-inline-form > input,
+  .recurrence-form > input,
+  .recurrence-form .select-field,
+  .recurrence-form .date-field,
+  .recurrence-summary-controls .date-field,
+  .shopping-tabs,
+  .shopping-inline-form,
+  .shopping-inline-form input,
+  .shopping-controls > input,
+  .shopping-controls .select-field,
+  .shopping-product-form > input,
+  .shopping-product-form .select-field,
+  .shopping-record-form > input,
+  .shopping-record-form .date-field,
+  .shopping-unit-form .date-field {
     flex-basis: auto;
     width: 100%;
   }
@@ -2045,13 +2713,24 @@ select:focus {
   .english-group-card,
   .knowledge-category-head,
   .knowledge-document-row,
-  .knowledge-trash-row {
+  .knowledge-trash-row,
+  .recurrence-card-head,
+  .recurrence-today-card,
+  .shopping-product-head,
+  .shopping-record-row {
     grid-template-columns: 1fr;
   }
 
   .word-preview-actions,
-  .knowledge-actions {
+  .knowledge-actions,
+  .recurrence-today-card .task-actions,
+  .shopping-product-head .task-actions,
+  .shopping-record-row .task-actions {
     justify-content: flex-end;
+  }
+
+  .recurrence-summary-controls .cancel-button {
+    width: 100%;
   }
 
   .search-panel {
