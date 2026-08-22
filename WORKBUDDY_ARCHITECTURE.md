@@ -7,7 +7,7 @@
 - `README.md`：写给其他使用者看的软件说明书，主要介绍 Workbuddy 有什么功能、怎么运行、数据如何备份。上传 GitHub 时需要同步更新。
 - 桌面 `Workbuddy本地打开说明.md`：写给用户本人看的电脑操作手册，解释本地文件、本地服务、端口、桌面快捷方式、缓存、Git 等基础操作。涉及电脑文件层面的变化时同步更新。
 - `WORKBUDDY_RULES.md`：项目协作原则，记录安全边界、Git/GitHub 规则、沟通方式。
-- `WORKBUDDY_ARCHITECTURE.md`：代码结构和模块边界说明，做功能改动前应先阅读。
+- `WORKBUDDY_ARCHITECTURE.md`：代码结构和模块边界说明；快改档不必阅读全文，结构/数据档按相关小节阅读。
 
 ## 当前项目形态
 
@@ -88,6 +88,12 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - `state.module === "shopping"` 时调用 `renderShoppingShell()`。
 - 其它情况才走每日计划任务列表。
 
+## 模态框
+
+- 页面内模态框使用 `openWorkbuddyModal()` 作为底座，背景压暗并阻止背景操作。
+- 删除、导入、恢复等危险确认使用 `confirmDangerAction()`，不要新增浏览器原生 `confirm()`。
+- 需要编辑多个字段的普通输入场景，应优先做 Workbuddy 风格表单模态框，不要用连续 `prompt()`。
+
 ## 每日计划
 
 每日计划包含：
@@ -150,6 +156,9 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - 词库数据来自 `english-wordbanks.js`。
 - 用户学习进度、备注、复习次数保存在 `workbuddy.english.v1`。
 - 每个词库独立统计已学和总数。
+- 词组保存在 `english.groups`；词组可保存 `defaultPartSpeech` 和 `note`，词组内每个单词保存为对象，包含 `word`、`partSpeech`、`translation`、`note`。
+- 旧词组数据里的 `words: string[]` 要继续兼容，规范化时转换为新单词对象数组。
+- 词组内添加和修改单词使用 Workbuddy 页面内模态框，不使用浏览器原生 `prompt()` 连续输入。
 - 美式/英式发音依赖浏览器和系统语音，不保证每台设备都有完整语音包。
 
 改动每日英语时，重点检查：
@@ -157,6 +166,8 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - `createEnglishTodayPanel()`
 - `createEnglishReviewPanel()`
 - `createEnglishLibraryPanel()`
+- `createEnglishGroupsPanel()`
+- `createEnglishGroupCard()`
 - `createWordCard()`
 - `createWordRow()`
 - `normalizeEnglish()`
@@ -222,9 +233,15 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - 使用独立数据键 `workbuddy.shopping.v1`，不要混入任务、英语或知识文库数据。
 - 购物数据只来自用户手动填写，不接入购物平台账号，不做自动抓取。
 - 分类是两级结构：一级分类保存在 `categories`，二级分类保存在 `subcategories`，商品通过 `categoryId` 和可空的 `subcategoryId` 归类。
-- 商品的数量单位保存在商品层级，购买记录只保存日期、平台、总价、数量和备注。
+- 商品的数量单位保存在商品层级，购买记录保存日期、本次名称、平台、总价、数量、可选国标号和备注。
+- 购买记录里的 `name` 是本次购买名称，用于同一商品词条下区分不同品牌或规格；旧记录没有 `name` 时，显示层用商品词条名称兜底。
+- 购买记录里的 `standardCode` 只保存 `GB/T` 后面的编号，界面展示时再拼成 `GB/T 编号`；为空时不显示。
+- 购买记录平台使用固定下拉选项：淘宝、京东、拼多多、抖音、盒马、阿里巴巴。
 - 单价不单独保存，渲染时用 `totalPrice / quantity` 临时计算。
 - 总价默认单位为元；数量单位是自由文本，用户不填写时不显示 `/单位`。
+- 分类区采用左侧目录式布局，一级分类和二级分类分区显示；商品搜索和排序属于右侧商品列表工具栏。
+- 商品比价导出使用前端生成 `.xlsx`，导出范围支持全部、当前视图和自定义一级/二级分类；工作簿包含购买记录明细、商品汇总和导出说明。
+- `.xlsx` 由 `createXlsxBlob()` 生成，复用项目内无压缩 ZIP 生成器，不依赖外部库。
 - 商品支持手动拖动排序；一级分类和二级分类标签也支持拖动排序，二级分类只在所属一级分类内排序。
 - 旧备份没有 `shopping` 字段时，导入和恢复都应保留当前本机购物数据，不能清空。
 
@@ -237,6 +254,8 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - `createShoppingProductCard()`
 - `createShoppingRecordForm()`
 - `createShoppingRecordRow()`
+- `openShoppingExportModal()`
+- `createShoppingWorkbookBlob()`
 - `shoppingVisibleProducts()`
 - `shoppingBestRecord()`
 - `normalizeShopping()`
@@ -285,14 +304,14 @@ C:\Users\qyc22\Documents\菜单\Workbuddy\关闭Workbuddy服务.cmd
 `index.html` 中 CSS/JS 使用查询参数版本号，例如：
 
 ```html
-./styles.css?v=63
-./app.js?v=63
+./styles.css?v=68
+./app.js?v=68
 ```
 
 `sw.js` 中也有缓存名，例如：
 
 ```js
-const cacheName = "workbuddy-v63";
+const cacheName = "workbuddy-v68";
 ```
 
 每次修改前端文件后，通常需要同步提升版本号，避免 Chrome 桌面版混用旧缓存。
@@ -327,19 +346,33 @@ const cacheName = "workbuddy-v63";
 做功能改动前：
 
 1. 阅读 `WORKBUDDY_RULES.md`。
-2. 如果是小文案、小样式、小 bug 修复，可以只读相关代码，不必阅读全文。
-3. 如果涉及新模块、跨模块逻辑、数据结构、全局备份、启动脚本、缓存策略或较大重构，阅读本文件。
-4. 确认要改的是哪个模块。
-5. 确认是否涉及用户私人数据。
-6. 确认是否需要同步全局备份。
-7. 确认是否需要更新 README、桌面手册、本文件或 `WORKBUDDY_RULES.md`。
+2. 如果新对话提供了交接文档或启动包，优先按最新交接内容确认 Git 状态、缓存版本、未完成事项和关键风险；不要依赖“见旧对话开头”这类不可见上下文。
+3. 如果是文案、小样式、按钮位置、局部 UI 或单个 bug，且不改数据结构、备份、缓存、启动或跨模块逻辑，可以只读相关代码，不必阅读全文。
+4. 如果是模块内功能调整但不改全局备份、不改存储结构、不影响其它模块，只需阅读本文件对应模块小节。
+5. 如果涉及新模块、跨模块逻辑、localStorage 字段、全局备份、导入导出、恢复数据、启动脚本、缓存策略、service worker 或较大重构，阅读本文件相关结构小节。
+6. 只有确定要提升缓存版本、准备提交 Git 或准备上传 GitHub 时，才需要检查 `VERSION_HISTORY.md`。
+7. 确认要改的是哪个模块。
+8. 确认是否涉及用户私人数据。
+9. 确认是否需要同步全局备份。
+10. 确认是否需要更新 README、桌面手册、本文件或 `WORKBUDDY_RULES.md`；预览阶段可先不更新 README，功能稳定或发布前再补。
+
+生成或更新交接文档时：
+
+1. 写清当前 Git 状态、本地缓存版本、未完成事项和关键风险。
+2. 写明新对话必须先读 `WORKBUDDY_RULES.md`。
+3. 写入流程分档摘要：快改档、标准功能档、结构/数据档、发布/GitHub 档，避免新对话重新回到全量文档流程。
 
 做完后至少检查：
 
 ```powershell
 node --check app.js
-node --check english-wordbanks.js
 git diff --check
+```
+
+只有修改 `english-wordbanks.js` 或相关导入逻辑时，才需要额外执行：
+
+```powershell
+node --check english-wordbanks.js
 ```
 
 如果系统 PATH 没有 Node，可以使用 Codex 自带 Node 路径检查。
@@ -350,6 +383,7 @@ git diff --check
 - 本次是否更新桌面 `Workbuddy本地打开说明.md`。
 - 本次是否更新 `WORKBUDDY_ARCHITECTURE.md`。
 - 本次是否更新 `WORKBUDDY_RULES.md`。
+- 本次是否更新 `VERSION_HISTORY.md`；快改档可简写说明未涉及文档更新。
 
 ## 不要做的事
 

@@ -9,6 +9,7 @@ const shoppingStorageKey = "workbuddy.shopping.v1";
 const legacyStorageKeys = ["daily-planner.tasks.v1"];
 const importBackupKey = "workbuddy.import-backup.v1";
 const legacyImportBackupKeys = ["daily-planner.import-backup.v1"];
+const shoppingPlatforms = ["淘宝", "京东", "拼多多", "抖音", "盒马", "阿里巴巴"];
 
 const state = {
   tasks: loadTasks(),
@@ -637,37 +638,33 @@ function createEnglishGroupsPanel() {
   const form = document.createElement("form");
   form.className = "english-group-form";
   form.innerHTML = `
-    <input name="title" type="text" maxlength="40" placeholder="组名" required />
-    <label class="select-field">
-      <span>类型</span>
-      <select name="type" aria-label="词组类型">
-        <option value="形近">形近</option>
-        <option value="近义">近义</option>
-        <option value="反义">反义</option>
-        <option value="义近">义近</option>
-        <option value="同主题">同主题</option>
-        <option value="自定义">自定义</option>
-      </select>
-    </label>
-    <input name="words" type="text" maxlength="120" placeholder="单词，用逗号分隔" required />
-    <input name="note" type="text" maxlength="120" placeholder="备注" />
-    <button class="primary-button" type="submit">添加</button>
+    <div class="english-group-main-fields">
+      <input name="title" type="text" maxlength="40" placeholder="词组类名" required />
+      <label class="select-field">
+        <span>类型</span>
+        <select name="type" aria-label="词组类型">
+          ${createEnglishGroupTypeOptions("近义")}
+        </select>
+      </label>
+      <input name="defaultPartSpeech" type="text" maxlength="24" placeholder="默认词性" />
+      <input name="note" type="text" maxlength="160" placeholder="词组备注" />
+      <button class="primary-button" type="submit">添加词组</button>
+    </div>
   `;
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const title = form.elements.title.value.trim();
-    const words = form.elements.words.value
-      .split(/[,，\s]+/)
-      .map((word) => word.trim())
-      .filter(Boolean);
-    if (!title || !words.length) return;
+    const defaultPartSpeech = form.elements.defaultPartSpeech.value.trim();
+    if (!title) return;
     state.english.groups.unshift({
       id: createId(),
       title,
       type: form.elements.type.value,
-      words,
+      defaultPartSpeech,
+      words: [],
       note: form.elements.note.value.trim(),
       createdAt: new Date().toISOString(),
+      updatedAt: null,
     });
     saveEnglish();
     render();
@@ -683,6 +680,41 @@ function createEnglishGroupsPanel() {
   state.english.groups.forEach((group) => list.append(createEnglishGroupCard(group)));
   panel.append(list);
   return panel;
+}
+
+function createEnglishGroupTypeOptions(selected = "近义") {
+  return ["形近", "近义", "反义", "义近", "同主题", "自定义"]
+    .map((type) => `<option value="${escapeHtml(type)}"${type === selected ? " selected" : ""}>${escapeHtml(type)}</option>`)
+    .join("");
+}
+
+function createEnglishGroupEditForm(group) {
+  const form = document.createElement("form");
+  form.className = "english-group-form english-group-edit-form";
+  form.innerHTML = `
+    <input name="title" type="text" maxlength="40" value="${escapeHtml(group.title)}" required />
+    <label class="select-field">
+      <span>类型</span>
+      <select name="type" aria-label="词组类型">
+        ${createEnglishGroupTypeOptions(group.type)}
+      </select>
+    </label>
+    <input name="defaultPartSpeech" type="text" maxlength="24" value="${escapeHtml(group.defaultPartSpeech || "")}" placeholder="默认词性" />
+    <input name="note" type="text" maxlength="160" value="${escapeHtml(group.note || "")}" placeholder="词组备注" />
+    <button class="save-button" type="submit">保存</button>
+  `;
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const title = form.elements.title.value.trim();
+    if (!title) return;
+    updateEnglishGroup(group.id, {
+      title,
+      type: form.elements.type.value,
+      defaultPartSpeech: form.elements.defaultPartSpeech.value.trim(),
+      note: form.elements.note.value.trim(),
+    });
+  });
+  return form;
 }
 
 function createEnglishSearchPanel() {
@@ -857,23 +889,279 @@ function createWordRow(word, bank) {
 function createEnglishGroupCard(group) {
   const card = document.createElement("article");
   card.className = "english-group-card";
+  const defaultPartSpeech = group.defaultPartSpeech ? `默认词性：${group.defaultPartSpeech}` : "";
   card.innerHTML = `
-    <div>
-      <div class="english-row-title">
-        <strong>${escapeHtml(group.title)}</strong>
-        <span>${escapeHtml(group.type)}</span>
+    <div class="english-group-content">
+      <div class="english-group-head">
+        <div>
+          <div class="english-row-title">
+            <strong>${escapeHtml(group.title)}</strong>
+            <span>${escapeHtml(group.type)}</span>
+            ${defaultPartSpeech ? `<span>${escapeHtml(defaultPartSpeech)}</span>` : ""}
+          </div>
+          ${group.note ? `<div class="english-row-meta">${escapeHtml(group.note)}</div>` : ""}
+        </div>
+        <div class="word-preview-actions">
+          <button class="icon-button small" type="button" data-action="add-word" aria-label="添加单词" title="添加单词">＋</button>
+          <button class="icon-button small" type="button" data-action="edit-group" aria-label="修改词组" title="修改词组">✎</button>
+          <button class="icon-button small" type="button" data-action="delete-group" aria-label="删除词组" title="删除词组">×</button>
+        </div>
       </div>
-      <div class="english-row-meta">${group.words.map(escapeHtml).join(" / ")}</div>
-      ${group.note ? `<div class="english-row-meta">${escapeHtml(group.note)}</div>` : ""}
+      <div class="english-group-word-list">
+        ${group.words.length ? group.words.map((word) => englishGroupWordHtml(word)).join("") : '<div class="english-row-meta">这个词组还没有单词。</div>'}
+      </div>
+      <div class="english-group-edit-slot" hidden></div>
     </div>
-    <button class="icon-button small" type="button" aria-label="删除词组" title="删除词组">×</button>
   `;
-  card.querySelector("button").addEventListener("click", () => {
-    state.english.groups = state.english.groups.filter((item) => item.id !== group.id);
-    saveEnglish();
-    render();
+  card.querySelector('[data-action="add-word"]').addEventListener("click", () => addEnglishGroupWord(group.id));
+  card.querySelector('[data-action="edit-group"]').addEventListener("click", () => {
+    const slot = card.querySelector(".english-group-edit-slot");
+    slot.hidden = !slot.hidden;
+    slot.replaceChildren(slot.hidden ? "" : createEnglishGroupEditForm(group));
+  });
+  card.querySelector('[data-action="delete-group"]').addEventListener("click", () => deleteEnglishGroup(group.id));
+  card.querySelectorAll("[data-word-id]").forEach((row) => {
+    const wordId = row.dataset.wordId;
+    row.querySelector('[data-action="edit-word"]').addEventListener("click", () => editEnglishGroupWord(group.id, wordId));
+    row.querySelector('[data-action="delete-word"]').addEventListener("click", () => deleteEnglishGroupWord(group.id, wordId));
   });
   return card;
+}
+
+function englishGroupWordHtml(word) {
+  return `
+    <div class="english-group-word-row" data-word-id="${escapeHtml(word.id)}">
+      <div class="english-group-word-main">
+        <strong>${escapeHtml(word.word)}</strong>
+        ${word.partSpeech ? `<span>${escapeHtml(word.partSpeech)}</span>` : ""}
+        ${word.translation ? `<em>${escapeHtml(word.translation)}</em>` : ""}
+      </div>
+      ${word.note ? `<div class="english-row-meta">${escapeHtml(word.note)}</div>` : ""}
+      <div class="word-preview-actions">
+        <button class="icon-button small" type="button" data-action="edit-word" aria-label="修改单词" title="修改单词">✎</button>
+        <button class="icon-button small" type="button" data-action="delete-word" aria-label="删除单词" title="删除单词">×</button>
+      </div>
+    </div>
+  `;
+}
+
+function openWorkbuddyModal({ title, body, actions, initialFocusSelector, onClose }) {
+  const overlay = document.createElement("div");
+  overlay.className = "workbuddy-modal-overlay";
+  overlay.setAttribute("role", "presentation");
+  const dialog = document.createElement("section");
+  dialog.className = "workbuddy-modal";
+  dialog.setAttribute("role", "dialog");
+  dialog.setAttribute("aria-modal", "true");
+  dialog.setAttribute("aria-label", title);
+  dialog.innerHTML = `
+    <div class="workbuddy-modal-head">
+      <h3>${escapeHtml(title)}</h3>
+      <button class="icon-button small" type="button" data-modal-close aria-label="关闭" title="关闭">×</button>
+    </div>
+  `;
+  const content = document.createElement("div");
+  content.className = "workbuddy-modal-body";
+  content.append(body);
+  const footer = document.createElement("div");
+  footer.className = "workbuddy-modal-actions";
+  actions.forEach((action) => footer.append(action));
+  dialog.append(content, footer);
+  overlay.append(dialog);
+  document.body.append(overlay);
+
+  const focusableSelector = [
+    "button:not([disabled])",
+    "input:not([disabled])",
+    "textarea:not([disabled])",
+    "select:not([disabled])",
+    "a[href]",
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(",");
+  const onKeyDown = (event) => {
+    if (event.key === "Escape" && document.body.contains(overlay)) {
+      event.preventDefault();
+      close();
+    }
+    if (event.key === "Tab" && document.body.contains(overlay)) {
+      const focusable = [...overlay.querySelectorAll(focusableSelector)].filter((element) => element.offsetParent !== null);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+  };
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    document.removeEventListener("keydown", onKeyDown);
+    overlay.remove();
+    onClose?.();
+  };
+  overlay.querySelector("[data-modal-close]").addEventListener("click", close);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) close();
+  });
+  document.addEventListener("keydown", onKeyDown);
+  requestAnimationFrame(() => {
+    const target = initialFocusSelector ? overlay.querySelector(initialFocusSelector) : overlay.querySelector(focusableSelector);
+    target?.focus();
+  });
+  return { overlay, close };
+}
+
+function confirmDangerAction({ title, message, confirmText = "确认" }) {
+  return new Promise((resolve) => {
+    let resolved = false;
+    const body = document.createElement("div");
+    body.className = "workbuddy-confirm-body";
+    body.textContent = message;
+    const cancel = document.createElement("button");
+    cancel.className = "cancel-button";
+    cancel.type = "button";
+    cancel.textContent = "取消";
+    const confirm = document.createElement("button");
+    confirm.className = "danger-button";
+    confirm.type = "button";
+    confirm.textContent = confirmText;
+    let modal;
+    const resolveWith = (value) => {
+      if (resolved) return;
+      resolved = true;
+      modal.close();
+      resolve(value);
+    };
+    modal = openWorkbuddyModal({
+      title,
+      body,
+      actions: [cancel, confirm],
+      initialFocusSelector: ".cancel-button",
+      onClose: () => {
+        if (resolved) return;
+        resolved = true;
+        resolve(false);
+      },
+    });
+    cancel.addEventListener("click", () => resolveWith(false));
+    confirm.addEventListener("click", () => resolveWith(true));
+  });
+}
+
+function updateEnglishGroup(groupId, updates) {
+  state.english.groups = state.english.groups.map((group) =>
+    group.id === groupId
+      ? {
+          ...group,
+          ...updates,
+          updatedAt: new Date().toISOString(),
+        }
+      : group,
+  );
+  saveEnglish();
+  render();
+}
+
+function addEnglishGroupWord(groupId) {
+  const group = state.english.groups.find((item) => item.id === groupId);
+  if (!group) return;
+  openEnglishGroupWordModal(group);
+}
+
+function editEnglishGroupWord(groupId, wordId) {
+  const group = state.english.groups.find((item) => item.id === groupId);
+  const entry = group?.words.find((word) => word.id === wordId);
+  if (!group || !entry) return;
+  openEnglishGroupWordModal(group, entry);
+}
+
+function openEnglishGroupWordModal(group, entry = null) {
+  const isEditing = Boolean(entry);
+  const form = document.createElement("form");
+  form.className = "english-group-word-modal-form";
+  form.innerHTML = `
+    <label class="date-field">
+      <span>英文单词</span>
+      <input name="word" type="text" maxlength="40" value="${escapeHtml(entry?.word || "")}" required />
+    </label>
+    <label class="date-field">
+      <span>词性</span>
+      <input name="partSpeech" type="text" maxlength="24" value="${escapeHtml(entry?.partSpeech || group.defaultPartSpeech || "")}" />
+    </label>
+    <label class="date-field">
+      <span>中文释义</span>
+      <input name="translation" type="text" maxlength="80" value="${escapeHtml(entry?.translation || "")}" />
+    </label>
+    <label class="date-field english-group-word-modal-note">
+      <span>单词备注</span>
+      <textarea name="note" maxlength="240">${escapeHtml(entry?.note || "")}</textarea>
+    </label>
+  `;
+  const cancel = document.createElement("button");
+  cancel.className = "cancel-button";
+  cancel.type = "button";
+  cancel.textContent = "取消";
+  const save = document.createElement("button");
+  save.className = "primary-button";
+  save.type = "submit";
+  save.textContent = "保存";
+  const modal = openWorkbuddyModal({
+    title: isEditing ? "修改单词" : "添加单词",
+    body: form,
+    actions: [cancel, save],
+    initialFocusSelector: 'input[name="word"]',
+  });
+  cancel.addEventListener("click", modal.close);
+  save.addEventListener("click", () => form.requestSubmit());
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const word = form.elements.word.value.trim();
+    if (!word) return;
+    const nextEntry = {
+      id: entry?.id || createId(),
+      word,
+      partSpeech: form.elements.partSpeech.value.trim(),
+      translation: form.elements.translation.value.trim(),
+      note: form.elements.note.value.trim(),
+    };
+    const words = isEditing
+      ? group.words.map((item) => (item.id === entry.id ? nextEntry : item))
+      : [...group.words, nextEntry];
+    modal.close();
+    updateEnglishGroup(group.id, { words });
+  });
+}
+
+async function deleteEnglishGroup(groupId) {
+  const confirmed = await confirmDangerAction({
+    title: "删除词组",
+    message: "删除这个词组会同时删除它下面的单词记录。",
+    confirmText: "删除",
+  });
+  if (!confirmed) return;
+  state.english.groups = state.english.groups.filter((item) => item.id !== groupId);
+  saveEnglish();
+  render();
+}
+
+async function deleteEnglishGroupWord(groupId, wordId) {
+  const group = state.english.groups.find((item) => item.id === groupId);
+  if (!group) return;
+  const confirmed = await confirmDangerAction({
+    title: "删除单词",
+    message: "删除后这个单词会从当前词组中移除。",
+    confirmText: "删除",
+  });
+  if (!confirmed) return;
+  updateEnglishGroup(groupId, {
+    words: group.words.filter((word) => word.id !== wordId),
+  });
 }
 
 function createEnglishEmptyCard(text) {
@@ -893,42 +1181,54 @@ function renderShoppingShell() {
 function createShoppingPanel() {
   const panel = document.createElement("section");
   panel.className = "shopping-panel";
-  panel.append(createShoppingCategoryTabs());
-  panel.append(createShoppingSubcategoryTabs());
-  panel.append(createShoppingControls());
-  panel.append(createShoppingProductForm());
+  const workspace = document.createElement("div");
+  workspace.className = "shopping-workspace";
+  const productArea = document.createElement("div");
+  productArea.className = "shopping-product-area";
+  productArea.append(createShoppingControls());
+  productArea.append(createShoppingProductForm());
 
   const products = shoppingVisibleProducts();
   if (state.shoppingSearch) {
-    panel.append(createShoppingSearchResults(products));
-    return panel;
+    productArea.append(createShoppingSearchResults(products));
+  } else if (!products.length) {
+    productArea.append(createShoppingEmptyCard("这里暂时没有商品。先新建分类，再添加商品。"));
+  } else {
+    const list = document.createElement("div");
+    list.className = "shopping-product-list";
+    products.forEach((product) => list.append(createShoppingProductCard(product)));
+    productArea.append(list);
   }
 
-  if (!products.length) {
-    panel.append(createShoppingEmptyCard("这里暂时没有商品。先新建分类，再添加商品。"));
-    return panel;
-  }
-
-  const list = document.createElement("div");
-  list.className = "shopping-product-list";
-  products.forEach((product) => list.append(createShoppingProductCard(product)));
-  panel.append(list);
+  workspace.append(createShoppingCategorySidebar(), productArea);
+  panel.append(workspace);
   return panel;
+}
+
+function createShoppingCategorySidebar() {
+  const sidebar = document.createElement("aside");
+  sidebar.className = "shopping-category-sidebar";
+  sidebar.append(createShoppingCategoryTabs());
+  sidebar.append(createShoppingSubcategoryTabs());
+  return sidebar;
 }
 
 function createShoppingCategoryTabs() {
   const section = document.createElement("div");
-  section.className = "shopping-category-bar";
+  section.className = "shopping-category-section shopping-primary-categories";
+  const heading = document.createElement("div");
+  heading.className = "shopping-category-heading";
+  heading.textContent = "一级分类";
   const tabs = document.createElement("div");
   tabs.className = "shopping-tabs";
-  tabs.append(createShoppingTab(shoppingTabLabel("全部", state.shopping.products.length), state.shoppingCategoryId === "all", () => {
+  tabs.append(createShoppingTab("全部", state.shopping.products.length, state.shoppingCategoryId === "all", () => {
     state.shoppingCategoryId = "all";
     state.shoppingSubcategoryId = "all";
     state.shoppingHighlightedProductId = null;
     render();
   }));
   sortedShoppingCategories().forEach((category) => {
-    tabs.append(createShoppingTab(shoppingTabLabel(category.name, shoppingCategoryProductCount(category.id)), state.shoppingCategoryId === category.id, () => {
+    tabs.append(createShoppingTab(category.name, shoppingCategoryProductCount(category.id), state.shoppingCategoryId === category.id, () => {
       state.shoppingCategoryId = category.id;
       state.shoppingSubcategoryId = "all";
       state.shoppingHighlightedProductId = null;
@@ -939,30 +1239,34 @@ function createShoppingCategoryTabs() {
       onDelete: () => deleteShoppingCategory(category.id),
     }));
   });
-  section.append(tabs, createShoppingCategoryForm());
+  section.append(heading, tabs, createShoppingCategoryForm());
   return section;
 }
 
 function createShoppingSubcategoryTabs() {
   const section = document.createElement("div");
-  section.className = "shopping-category-bar shopping-subcategory-bar";
+  section.className = "shopping-category-section shopping-subcategory-bar";
+  const heading = document.createElement("div");
+  heading.className = "shopping-category-heading";
+  heading.textContent = "二级分类";
+  section.append(heading);
   if (state.shoppingCategoryId === "all") {
     const note = document.createElement("div");
     note.className = "shopping-inline-note";
-    note.textContent = "选择一级分类后，可以管理它下面的二级分类。";
+    note.textContent = "选择一级分类后管理二级分类。";
     section.append(note);
     return section;
   }
 
   const tabs = document.createElement("div");
   tabs.className = "shopping-tabs";
-  tabs.append(createShoppingTab(shoppingTabLabel("全部", shoppingCategoryProductCount(state.shoppingCategoryId)), state.shoppingSubcategoryId === "all", () => {
+  tabs.append(createShoppingTab("全部", shoppingCategoryProductCount(state.shoppingCategoryId), state.shoppingSubcategoryId === "all", () => {
     state.shoppingSubcategoryId = "all";
     state.shoppingHighlightedProductId = null;
     render();
   }));
   shoppingSubcategoriesFor(state.shoppingCategoryId).forEach((subcategory) => {
-    tabs.append(createShoppingTab(shoppingTabLabel(subcategory.name, shoppingSubcategoryProductCount(subcategory.id)), state.shoppingSubcategoryId === subcategory.id, () => {
+    tabs.append(createShoppingTab(subcategory.name, shoppingSubcategoryProductCount(subcategory.id), state.shoppingSubcategoryId === subcategory.id, () => {
       state.shoppingSubcategoryId = subcategory.id;
       state.shoppingHighlightedProductId = null;
       render();
@@ -976,13 +1280,16 @@ function createShoppingSubcategoryTabs() {
   return section;
 }
 
-function createShoppingTab(label, active, onClick, actions = {}) {
+function createShoppingTab(label, count, active, onClick, actions = {}) {
   const wrap = document.createElement("div");
   wrap.className = `shopping-tab-wrap${active ? " is-active" : ""}`;
   const button = document.createElement("button");
   button.className = "shopping-tab";
   button.type = "button";
-  button.textContent = label;
+  button.innerHTML = `
+    <span class="shopping-tab-name">${escapeHtml(label)}</span>
+    <span class="shopping-tab-count">${count}</span>
+  `;
   button.addEventListener("click", onClick);
   wrap.append(button);
   if (actions.sortKey) {
@@ -1048,9 +1355,9 @@ function createShoppingSubcategoryForm(categoryId) {
 
 function createShoppingControls() {
   const controls = document.createElement("div");
-  controls.className = "shopping-controls";
+  controls.className = "shopping-list-toolbar";
   controls.innerHTML = `
-    <input type="search" placeholder="搜索商品、平台或备注" value="${escapeHtml(state.shoppingSearch)}" />
+    <input type="search" placeholder="搜索商品、本次名称、平台、国标或备注" value="${escapeHtml(state.shoppingSearch)}" />
     <label class="select-field">
       <span>排序</span>
       <select aria-label="商品排序">
@@ -1058,6 +1365,7 @@ function createShoppingControls() {
         <option value="name"${state.shoppingSort === "name" ? " selected" : ""}>名称顺序</option>
       </select>
     </label>
+    <button class="save-button" type="button" data-action="export-shopping">导出</button>
   `;
   controls.querySelector('input[type="search"]').addEventListener("input", (event) => {
     state.shoppingSearch = event.target.value.trim();
@@ -1068,6 +1376,7 @@ function createShoppingControls() {
     state.shoppingSort = event.target.value;
     render();
   });
+  controls.querySelector('[data-action="export-shopping"]').addEventListener("click", openShoppingExportModal);
   return controls;
 }
 
@@ -1225,7 +1534,13 @@ function createShoppingRecordForm(product) {
   form.className = "shopping-record-form";
   form.innerHTML = `
     <input name="date" type="date" value="${state.selectedDate}" required />
-    <input name="platform" type="text" maxlength="40" placeholder="平台" required />
+    <input name="name" type="text" maxlength="80" placeholder="本次名称" required />
+    <label class="select-field">
+      <span>平台</span>
+      <select name="platform" aria-label="平台" required>
+        ${shoppingPlatformOptions()}
+      </select>
+    </label>
     <label class="date-field">
       <span>总价</span>
       <input name="totalPrice" type="number" min="0" step="0.01" required />
@@ -1233,6 +1548,10 @@ function createShoppingRecordForm(product) {
     <label class="date-field">
       <span>数量</span>
       <input name="quantity" type="number" min="0" step="0.01" required />
+    </label>
+    <label class="date-field shopping-standard-field">
+      <span>GB/T</span>
+      <input name="standardCode" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="24" placeholder="国标号" />
     </label>
     <input name="note" type="text" maxlength="80" placeholder="备注" />
     <button class="primary-button" type="submit">添加记录</button>
@@ -1242,12 +1561,15 @@ function createShoppingRecordForm(product) {
     const totalPrice = normalizeMoneyInput(form.elements.totalPrice.value);
     const quantity = normalizeMoneyInput(form.elements.quantity.value);
     const platform = form.elements.platform.value.trim();
-    if (!platform || totalPrice === null || quantity === null || quantity <= 0) return;
+    const name = form.elements.name.value.trim();
+    if (!name || !shoppingPlatforms.includes(platform) || totalPrice === null || quantity === null || quantity <= 0) return;
     addShoppingRecord(product.id, {
       date: form.elements.date.value || state.selectedDate,
+      name,
       platform,
       totalPrice,
       quantity,
+      standardCode: normalizeShoppingStandardCode(form.elements.standardCode.value),
       note: form.elements.note.value.trim(),
     });
   });
@@ -1270,10 +1592,13 @@ function createShoppingRecordRow(product, record) {
   row.className = "shopping-record-row";
   const unitPrice = shoppingUnitPrice(record);
   const unit = product.unit ? ` ${escapeHtml(product.unit)}` : "";
+  const recordName = shoppingRecordName(product, record);
+  const standardText = shoppingRecordStandardText(record);
   row.innerHTML = `
     <div>
-      <strong>${escapeHtml(formatTaskDate(record.date))} · ${escapeHtml(record.platform)}</strong>
+      <strong>${escapeHtml(formatTaskDate(record.date))} · ${escapeHtml(recordName)} · ${escapeHtml(record.platform)}</strong>
       <span>总价 ${formatMoney(record.totalPrice)} 元 · 数量 ${formatQuantity(record.quantity)}${unit} · 单价 ${formatUnitPrice(unitPrice)} 元${product.unit ? `/${escapeHtml(product.unit)}` : ""}</span>
+      ${standardText ? `<span>${escapeHtml(standardText)}</span>` : ""}
       ${record.note ? `<span>${escapeHtml(record.note)}</span>` : ""}
     </div>
     <div class="task-actions">
@@ -1291,6 +1616,206 @@ function createShoppingEmptyCard(text) {
   card.className = "shopping-empty-card";
   card.textContent = text;
   return card;
+}
+
+function openShoppingExportModal() {
+  const body = document.createElement("div");
+  body.className = "shopping-export-modal";
+  body.innerHTML = `
+    <div class="shopping-export-options" role="radiogroup" aria-label="导出范围">
+      <label><input type="radio" name="shoppingExportScope" value="all" checked /> 全部商品</label>
+      <label><input type="radio" name="shoppingExportScope" value="current" /> 当前视图</label>
+      <label><input type="radio" name="shoppingExportScope" value="custom" /> 自定义范围</label>
+    </div>
+    <div class="shopping-export-tree" hidden></div>
+    <div class="shopping-export-summary" aria-live="polite"></div>
+  `;
+  const tree = body.querySelector(".shopping-export-tree");
+  const summary = body.querySelector(".shopping-export-summary");
+  tree.append(createShoppingExportTree());
+  const cancel = document.createElement("button");
+  cancel.className = "cancel-button";
+  cancel.type = "button";
+  cancel.textContent = "取消";
+  const exportButton = document.createElement("button");
+  exportButton.className = "primary-button";
+  exportButton.type = "button";
+  exportButton.textContent = "导出 Excel";
+
+  const selectedScope = () => body.querySelector('input[name="shoppingExportScope"]:checked')?.value || "all";
+  const selectedProducts = () => shoppingProductsForExport(selectedScope(), collectShoppingExportSelection(body));
+  const updateSummary = () => {
+    const scope = selectedScope();
+    tree.hidden = scope !== "custom";
+    const products = selectedProducts();
+    const recordCount = products.reduce((sum, product) => sum + product.records.length, 0);
+    summary.textContent = `将导出 ${products.length} 个商品词条、${recordCount} 条购买记录。`;
+    exportButton.disabled = !products.length;
+  };
+
+  body.querySelectorAll('input[name="shoppingExportScope"]').forEach((input) => input.addEventListener("change", updateSummary));
+  setupShoppingExportTreeInteractions(tree, updateSummary);
+  const modal = openWorkbuddyModal({
+    title: "导出商品比价",
+    body,
+    actions: [cancel, exportButton],
+    initialFocusSelector: 'input[name="shoppingExportScope"]',
+  });
+  cancel.addEventListener("click", modal.close);
+  exportButton.addEventListener("click", async () => {
+    const scope = selectedScope();
+    const products = selectedProducts();
+    if (!products.length) return;
+    const exportedAt = new Date();
+    const filename = `Workbuddy商品比价-${formatFileStamp(exportedAt)}.xlsx`;
+    const blob = createShoppingWorkbookBlob(products, {
+      exportedAt,
+      scopeLabel: shoppingExportScopeLabel(scope, body),
+    });
+    modal.close();
+    const result = await saveGeneratedFile(blob, filename, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    if (result === "saved") showBackupStatus("已保存商品比价 Excel");
+    if (result === "downloaded") showBackupStatus("已下载商品比价 Excel");
+    if (result === "cancelled") showBackupStatus("已取消导出");
+  });
+  updateSummary();
+}
+
+function createShoppingExportTree() {
+  const wrap = document.createElement("div");
+  wrap.className = "shopping-export-category-list";
+  if (!state.shopping.categories.length) {
+    wrap.textContent = "还没有一级分类。";
+    return wrap;
+  }
+  sortedShoppingCategories().forEach((category) => {
+    const categoryProducts = state.shopping.products.filter((product) => product.categoryId === category.id);
+    const block = document.createElement("div");
+    block.className = "shopping-export-category";
+    block.innerHTML = `
+      <label class="shopping-export-category-label">
+        <input type="checkbox" data-export-category="${escapeHtml(category.id)}" />
+        <span>${escapeHtml(category.name)}</span>
+        <em>${categoryProducts.length}</em>
+      </label>
+    `;
+    const children = document.createElement("div");
+    children.className = "shopping-export-subcategory-list";
+    const uncategorizedCount = categoryProducts.filter((product) => !product.subcategoryId).length;
+    if (uncategorizedCount) {
+      children.append(createShoppingExportChildCheckbox({
+        label: "未归入二级分类",
+        count: uncategorizedCount,
+        attr: "data-export-uncategorized",
+        id: category.id,
+      }));
+    }
+    shoppingSubcategoriesFor(category.id).forEach((subcategory) => {
+      children.append(createShoppingExportChildCheckbox({
+        label: subcategory.name,
+        count: shoppingSubcategoryProductCount(subcategory.id),
+        attr: "data-export-subcategory",
+        id: subcategory.id,
+      }));
+    });
+    block.append(children);
+    wrap.append(block);
+  });
+  return wrap;
+}
+
+function createShoppingExportChildCheckbox({ label, count, attr, id }) {
+  const child = document.createElement("label");
+  child.className = "shopping-export-child";
+  child.innerHTML = `
+    <input type="checkbox" ${attr}="${escapeHtml(id)}" />
+    <span>${escapeHtml(label)}</span>
+    <em>${count}</em>
+  `;
+  return child;
+}
+
+function setupShoppingExportTreeInteractions(tree, onChange) {
+  tree.querySelectorAll("[data-export-category]").forEach((categoryInput) => {
+    const block = categoryInput.closest(".shopping-export-category");
+    const childInputs = shoppingExportChildInputs(block);
+    categoryInput.addEventListener("change", () => {
+      categoryInput.indeterminate = false;
+      childInputs.forEach((input) => {
+        input.checked = categoryInput.checked;
+      });
+      onChange();
+    });
+  });
+  tree.querySelectorAll("[data-export-subcategory], [data-export-uncategorized]").forEach((childInput) => {
+    childInput.addEventListener("change", () => {
+      syncShoppingExportParentState(childInput.closest(".shopping-export-category"));
+      onChange();
+    });
+  });
+}
+
+function shoppingExportChildInputs(block) {
+  if (!block) return [];
+  return [...block.querySelectorAll("[data-export-subcategory], [data-export-uncategorized]")];
+}
+
+function syncShoppingExportParentState(block) {
+  const parent = block?.querySelector("[data-export-category]");
+  if (!parent) return;
+  const childInputs = shoppingExportChildInputs(block);
+  const checkedCount = childInputs.filter((input) => input.checked).length;
+  parent.checked = childInputs.length > 0 && checkedCount === childInputs.length;
+  parent.indeterminate = checkedCount > 0 && checkedCount < childInputs.length;
+}
+
+function collectShoppingExportSelection(container) {
+  return {
+    categories: new Set([...container.querySelectorAll("[data-export-category]:checked")].map((input) => input.dataset.exportCategory)),
+    subcategories: new Set([...container.querySelectorAll("[data-export-subcategory]:checked")].map((input) => input.dataset.exportSubcategory)),
+    uncategorizedCategories: new Set([...container.querySelectorAll("[data-export-uncategorized]:checked")].map((input) => input.dataset.exportUncategorized)),
+  };
+}
+
+function shoppingProductsForExport(scope, selection) {
+  if (scope === "current") return shoppingVisibleProducts();
+  if (scope !== "custom") return sortShoppingProducts(state.shopping.products);
+  const products = state.shopping.products.filter((product) => {
+    if (selection.categories.has(product.categoryId)) return true;
+    if (product.subcategoryId && selection.subcategories.has(product.subcategoryId)) return true;
+    if (!product.subcategoryId && selection.uncategorizedCategories.has(product.categoryId)) return true;
+    return false;
+  });
+  return sortShoppingProducts(products);
+}
+
+function shoppingExportScopeLabel(scope, container) {
+  if (scope === "all") return "全部商品";
+  if (scope === "current") {
+    if (state.shoppingSearch) return `当前搜索：${state.shoppingSearch}`;
+    if (state.shoppingCategoryId === "all") return "当前视图：全部商品";
+    const category = shoppingCategoryById(state.shoppingCategoryId)?.name || "未知一级分类";
+    if (state.shoppingSubcategoryId === "all") return `当前视图：${category}`;
+    const subcategory = shoppingSubcategoryById(state.shoppingSubcategoryId)?.name || "未知二级分类";
+    return `当前视图：${category} > ${subcategory}`;
+  }
+  const selection = collectShoppingExportSelection(container);
+  const parts = [
+    ...[...selection.categories].map((id) => shoppingCategoryById(id)?.name).filter(Boolean),
+    ...[...selection.subcategories].map((id) => {
+      const subcategory = shoppingSubcategoryById(id);
+      if (!subcategory) return "";
+      if (selection.categories.has(subcategory.categoryId)) return "";
+      const category = shoppingCategoryById(subcategory.categoryId)?.name || "未知一级分类";
+      return `${category} > ${subcategory.name}`;
+    }).filter(Boolean),
+    ...[...selection.uncategorizedCategories].map((id) => {
+      if (selection.categories.has(id)) return "";
+      const category = shoppingCategoryById(id)?.name;
+      return category ? `${category} > 未归入二级分类` : "";
+    }).filter(Boolean),
+  ];
+  return parts.length ? `自定义范围：${parts.join("；")}` : "自定义范围";
 }
 
 function renderKnowledgeShell() {
@@ -2021,10 +2546,14 @@ function updateKnowledgeDocumentCategories(documentId, categoryIds) {
   render();
 }
 
-function deleteKnowledgeCategory(categoryId) {
+async function deleteKnowledgeCategory(categoryId) {
   const category = knowledgeCategoryById(categoryId);
   if (!category || category.id === "uncategorized") return;
-  const confirmed = confirm("删除分类会把只属于这个分类的文档一起放入回收站。继续吗？");
+  const confirmed = await confirmDangerAction({
+    title: "删除分类",
+    message: "删除分类会把只属于这个分类的文档一起放入回收站。",
+    confirmText: "删除",
+  });
   if (!confirmed) return;
 
   const deletedAt = new Date().toISOString();
@@ -2056,10 +2585,14 @@ function deleteKnowledgeCategory(categoryId) {
   render();
 }
 
-function deleteKnowledgeDocument(documentId) {
+async function deleteKnowledgeDocument(documentId) {
   const doc = knowledgeDocumentById(documentId);
   if (!doc) return;
-  const confirmed = confirm("删除后会先放入回收站，不会立刻彻底删除。继续吗？");
+  const confirmed = await confirmDangerAction({
+    title: "删除文档",
+    message: "删除后会先放入回收站，不会立刻彻底删除。",
+    confirmText: "删除",
+  });
   if (!confirmed) return;
   state.knowledge.trash.unshift({
     id: createId(),
@@ -2124,15 +2657,19 @@ function restoreKnowledgeTrashItem(item) {
   }
 }
 
-function purgeKnowledgeTrash(trashId) {
-  const confirmed = confirm("彻底删除后不能从回收站恢复。继续吗？");
+async function purgeKnowledgeTrash(trashId) {
+  const confirmed = await confirmDangerAction({
+    title: "彻底删除",
+    message: "彻底删除后不能从回收站恢复。",
+    confirmText: "彻底删除",
+  });
   if (!confirmed) return;
   state.knowledge.trash = state.knowledge.trash.filter((entry) => entry.id !== trashId);
   saveKnowledge();
   render();
 }
 
-function deleteSelectedKnowledgeItems() {
+async function deleteSelectedKnowledgeItems() {
   const selectedCategoryIds = selectedKnowledgeCategoryIds();
   const selectedDocumentIds = selectedKnowledgeDocumentIds();
   const deletableCategoryIds = selectedCategoryIds.filter((id) => id !== "uncategorized");
@@ -2141,9 +2678,11 @@ function deleteSelectedKnowledgeItems() {
     alert(selectedCategoryIds.includes("uncategorized") ? "未分类是固定分类，不能删除。" : "请先选择要删除的文件夹或文档。");
     return;
   }
-  const confirmed = confirm(
-    `将删除 ${deletableCategoryIds.length} 个分类、${selectedDocuments.length} 篇文档，删除内容会先进入回收站。继续吗？`,
-  );
+  const confirmed = await confirmDangerAction({
+    title: "批量删除",
+    message: `将删除 ${deletableCategoryIds.length} 个分类、${selectedDocuments.length} 篇文档，删除内容会先进入回收站。`,
+    confirmText: "删除",
+  });
   if (!confirmed) return;
 
   const deletedAt = new Date().toISOString();
@@ -2303,13 +2842,17 @@ function restoreSelectedKnowledgeTrash() {
   render();
 }
 
-function purgeSelectedKnowledgeTrash() {
+async function purgeSelectedKnowledgeTrash() {
   const selectedTrashIds = selectedKnowledgeTrashIds();
   if (!selectedTrashIds.length) {
     alert("请先选择要彻底删除的内容。");
     return;
   }
-  const confirmed = confirm(`将彻底删除 ${selectedTrashIds.length} 项，删除后不能从回收站恢复。继续吗？`);
+  const confirmed = await confirmDangerAction({
+    title: "批量彻底删除",
+    message: `将彻底删除 ${selectedTrashIds.length} 项，删除后不能从回收站恢复。`,
+    confirmText: "彻底删除",
+  });
   if (!confirmed) return;
   const selected = new Set(selectedTrashIds);
   state.knowledge.trash = state.knowledge.trash.filter((item) => !selected.has(item.id));
@@ -2588,7 +3131,7 @@ function safeFileName(value) {
   return cleaned || "未命名文档";
 }
 
-function createZipBlob(files) {
+function createZipBlob(files, type = "application/zip") {
   const encoder = new TextEncoder();
   const localParts = [];
   const centralParts = [];
@@ -2615,7 +3158,7 @@ function createZipBlob(files) {
   view.setUint32(12, centralSize, true);
   view.setUint32(16, offset, true);
 
-  return new Blob([...localParts, ...centralParts, end], { type: "application/zip" });
+  return new Blob([...localParts, ...centralParts, end], { type });
 }
 
 function createZipHeader(signature, nameBytes, size, crc, localOffset = 0) {
@@ -5009,8 +5552,12 @@ function toggleRecurrenceActive(id) {
   render();
 }
 
-function deleteRecurrence(id) {
-  const shouldDelete = confirm("删除这个周期任务会同时删除它的完成历史。继续删除吗？");
+async function deleteRecurrence(id) {
+  const shouldDelete = await confirmDangerAction({
+    title: "删除周期任务",
+    message: "删除这个周期任务会同时删除它的完成历史。",
+    confirmText: "删除",
+  });
   if (!shouldDelete) return;
   state.recurrences.items = state.recurrences.items.filter((item) => item.id !== id);
   state.recurrenceEditing = null;
@@ -5182,8 +5729,12 @@ function renameShoppingProduct(id) {
   updateShoppingProduct(id, { name: name.trim() });
 }
 
-function deleteShoppingProduct(id) {
-  const shouldDelete = confirm("删除这个商品会同时删除它的购买记录。继续删除吗？");
+async function deleteShoppingProduct(id) {
+  const shouldDelete = await confirmDangerAction({
+    title: "删除商品",
+    message: "删除这个商品会同时删除它的购买记录。",
+    confirmText: "删除",
+  });
   if (!shouldDelete) return;
   state.shopping.products = state.shopping.products.filter((product) => product.id !== id);
   if (state.shoppingExpandedProductId === id) state.shoppingExpandedProductId = null;
@@ -5201,9 +5752,11 @@ function addShoppingRecord(productId, record) {
         {
           id: createId(),
           date: record.date,
+          name: record.name,
           platform: record.platform,
           totalPrice: roundMoney(record.totalPrice),
           quantity: roundMoney(record.quantity),
+          standardCode: normalizeShoppingStandardCode(record.standardCode),
           note: record.note || "",
           createdAt: new Date().toISOString(),
           updatedAt: null,
@@ -5222,12 +5775,19 @@ function editShoppingRecord(productId, recordId) {
   if (!record) return;
   const date = prompt("购买日期：", record.date);
   if (date === null) return;
-  const platform = prompt("平台：", record.platform);
-  if (platform === null || !platform.trim()) return;
+  const name = prompt("本次名称：", shoppingRecordName(product, record));
+  if (name === null || !name.trim()) return;
+  const platform = prompt(`平台（${shoppingPlatforms.join("、")}）：`, record.platform);
+  if (platform === null || !shoppingPlatforms.includes(platform.trim())) {
+    alert("平台必须从固定选项中选择：淘宝、京东、拼多多、抖音、盒马、阿里巴巴。");
+    return;
+  }
   const totalPrice = prompt("总价（元）：", formatMoney(record.totalPrice));
   if (totalPrice === null) return;
   const quantity = prompt("数量：", formatQuantity(record.quantity));
   if (quantity === null) return;
+  const standardCode = prompt("国标号（只填 GB/T 后面的数字，可不填）：", normalizeShoppingStandardCode(record.standardCode));
+  if (standardCode === null) return;
   const note = prompt("备注：", record.note || "");
   if (note === null) return;
   const parsedTotal = normalizeMoneyInput(totalPrice);
@@ -5245,9 +5805,11 @@ function editShoppingRecord(productId, recordId) {
           ? {
               ...entry,
               date,
+              name: name.trim(),
               platform: platform.trim(),
               totalPrice: roundMoney(parsedTotal),
               quantity: roundMoney(parsedQuantity),
+              standardCode: normalizeShoppingStandardCode(standardCode),
               note: note.trim(),
               updatedAt: new Date().toISOString(),
             }
@@ -5500,8 +6062,10 @@ function sortedShoppingCategories() {
   return [...state.shopping.categories].sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name, "zh-CN"));
 }
 
-function shoppingTabLabel(label, count) {
-  return `${label} ${count}`;
+function shoppingPlatformOptions(selected = "") {
+  return shoppingPlatforms
+    .map((platform) => `<option value="${escapeHtml(platform)}"${platform === selected ? " selected" : ""}>${escapeHtml(platform)}</option>`)
+    .join("");
 }
 
 function shoppingCategoryProductCount(categoryId) {
@@ -5541,7 +6105,9 @@ function sortShoppingProducts(products) {
 }
 
 function shoppingProductMatches(product, keyword) {
-  const recordText = product.records.map((record) => `${record.platform} ${record.note || ""}`).join(" ");
+  const recordText = product.records
+    .map((record) => `${record.name || ""} ${record.platform} ${record.standardCode || ""} ${shoppingRecordStandardText(record)} ${record.note || ""}`)
+    .join(" ");
   const path = shoppingProductPath(product);
   return `${product.name} ${path} ${recordText}`.toLowerCase().includes(keyword);
 }
@@ -5572,6 +6138,20 @@ function shoppingUnitPrice(record) {
   return Number(record.totalPrice) / quantity;
 }
 
+function shoppingRecordName(product, record) {
+  return record.name || product.name;
+}
+
+function shoppingRecordStandardText(record) {
+  const code = normalizeShoppingStandardCode(record.standardCode);
+  return code ? `GB/T ${code}` : "";
+}
+
+function normalizeShoppingStandardCode(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).replace(/^GB\/T\s*/i, "").trim();
+}
+
 function sortedShoppingRecords(product) {
   return [...product.records].sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || "").localeCompare(a.createdAt || ""));
 }
@@ -5598,6 +6178,226 @@ function nextShoppingSubcategoryOrder(categoryId) {
 
 function nextShoppingProductOrder() {
   return Math.max(0, ...state.shopping.products.map((product) => product.order || 0)) + 1;
+}
+
+function createShoppingWorkbookBlob(products, { exportedAt, scopeLabel }) {
+  const detailRows = [
+    ["一级分类", "二级分类", "商品词条", "本次名称", "平台", "购买日期", "国标", "总价", "数量", "单位", "单价", "备注"],
+  ];
+  products.forEach((product) => {
+    sortedShoppingRecords(product).forEach((record) => {
+      detailRows.push([
+        shoppingCategoryById(product.categoryId)?.name || "未分类",
+        product.subcategoryId ? shoppingSubcategoryById(product.subcategoryId)?.name || "" : "",
+        product.name,
+        shoppingRecordName(product, record),
+        record.platform,
+        record.date,
+        shoppingRecordStandardText(record),
+        Number(record.totalPrice) || 0,
+        Number(record.quantity) || 0,
+        product.unit || "",
+        shoppingUnitPrice(record) ?? "",
+        record.note || "",
+      ]);
+    });
+  });
+
+  const summaryRows = [
+    ["一级分类", "二级分类", "商品词条", "单位", "记录数", "最低单价", "最低价平台", "最低价本次名称", "最低价日期", "最近购买日期"],
+  ];
+  products.forEach((product) => {
+    const best = shoppingBestRecord(product);
+    const latest = sortedShoppingRecords(product)[0];
+    summaryRows.push([
+      shoppingCategoryById(product.categoryId)?.name || "未分类",
+      product.subcategoryId ? shoppingSubcategoryById(product.subcategoryId)?.name || "" : "",
+      product.name,
+      product.unit || "",
+      product.records.length,
+      best?.unitPrice ?? "",
+      best?.record.platform || "",
+      best ? shoppingRecordName(product, best.record) : "",
+      best?.record.date || "",
+      latest?.date || "",
+    ]);
+  });
+
+  const recordCount = products.reduce((sum, product) => sum + product.records.length, 0);
+  const infoRows = [
+    ["项目", "内容"],
+    ["导出时间", exportedAt.toLocaleString("zh-CN")],
+    ["导出范围", scopeLabel],
+    ["商品词条数", products.length],
+    ["购买记录数", recordCount],
+    ["说明", "购买记录明细是一行一条购买记录；商品汇总是一行一个商品词条。"],
+  ];
+
+  return createXlsxBlob([
+    { name: "购买记录明细", rows: detailRows },
+    { name: "商品汇总", rows: summaryRows },
+    { name: "导出说明", rows: infoRows },
+  ]);
+}
+
+function createXlsxBlob(sheets) {
+  const worksheetFiles = sheets.map((sheet, index) => ({
+    name: `xl/worksheets/sheet${index + 1}.xml`,
+    content: createXlsxWorksheetXml(sheet.rows),
+  }));
+  const files = [
+    {
+      name: "[Content_Types].xml",
+      content: createXlsxContentTypesXml(sheets.length),
+    },
+    {
+      name: "_rels/.rels",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>`,
+    },
+    {
+      name: "docProps/core.xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <dc:creator>Workbuddy</dc:creator>
+  <cp:lastModifiedBy>Workbuddy</cp:lastModifiedBy>
+  <dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created>
+  <dcterms:modified xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:modified>
+</cp:coreProperties>`,
+    },
+    {
+      name: "docProps/app.xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <Application>Workbuddy</Application>
+</Properties>`,
+    },
+    {
+      name: "xl/workbook.xml",
+      content: createXlsxWorkbookXml(sheets),
+    },
+    {
+      name: "xl/_rels/workbook.xml.rels",
+      content: createXlsxWorkbookRelsXml(sheets.length),
+    },
+    {
+      name: "xl/styles.xml",
+      content: createXlsxStylesXml(),
+    },
+    ...worksheetFiles,
+  ];
+  return createZipBlob(files, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+}
+
+function createXlsxContentTypesXml(sheetCount) {
+  const sheets = Array.from({ length: sheetCount }, (_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+  ${sheets}
+</Types>`;
+}
+
+function createXlsxWorkbookXml(sheets) {
+  const sheetNodes = sheets
+    .map((sheet, index) => `<sheet name="${xmlAttribute(safeSheetName(sheet.name, index))}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`)
+    .join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>${sheetNodes}</sheets>
+</workbook>`;
+}
+
+function createXlsxWorkbookRelsXml(sheetCount) {
+  const sheetRels = Array.from(
+    { length: sheetCount },
+    (_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`,
+  ).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  ${sheetRels}
+  <Relationship Id="rId${sheetCount + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+}
+
+function createXlsxStylesXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
+  <fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
+  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0"/><xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+}
+
+function createXlsxWorksheetXml(rows) {
+  const colCount = Math.max(1, ...rows.map((row) => row.length));
+  const columnWidths = Array.from({ length: colCount }, (_, index) => {
+    const maxLength = rows.reduce((max, row) => Math.max(max, stringLengthForWidth(row[index])), 8);
+    return Math.min(Math.max(maxLength + 2, 10), 42);
+  });
+  const cols = columnWidths.map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join("");
+  const rowNodes = rows
+    .map((row, rowIndex) => {
+      const cells = row.map((value, columnIndex) => createXlsxCell(value, rowIndex + 1, columnIndex + 1, rowIndex === 0)).join("");
+      return `<row r="${rowIndex + 1}">${cells}</row>`;
+    })
+    .join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+  <cols>${cols}</cols>
+  <sheetData>${rowNodes}</sheetData>
+</worksheet>`;
+}
+
+function createXlsxCell(value, rowIndex, columnIndex, isHeader) {
+  const ref = `${columnName(columnIndex)}${rowIndex}`;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return `<c r="${ref}" s="${isHeader ? 1 : 2}"><v>${value}</v></c>`;
+  }
+  const text = value === null || value === undefined ? "" : String(value);
+  return `<c r="${ref}" t="inlineStr" s="${isHeader ? 1 : 0}"><is><t>${xmlText(text)}</t></is></c>`;
+}
+
+function safeSheetName(name, index) {
+  const cleaned = String(name || `Sheet${index + 1}`).replace(/[\[\]:*?/\\]/g, " ").trim();
+  return (cleaned || `Sheet${index + 1}`).slice(0, 31);
+}
+
+function stringLengthForWidth(value) {
+  if (value === null || value === undefined) return 0;
+  return String(value).replace(/[^\x00-\xff]/g, "xx").length;
+}
+
+function columnName(index) {
+  let name = "";
+  let value = index;
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    value = Math.floor((value - 1) / 26);
+  }
+  return name;
+}
+
+function xmlText(value) {
+  return String(value ?? "").replace(/[&<>]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[char]);
+}
+
+function xmlAttribute(value) {
+  return xmlText(value).replace(/"/g, "&quot;");
 }
 
 function normalizeMoneyInput(value) {
@@ -5836,11 +6636,39 @@ function downloadBackupFile(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-function importTasks(event) {
+async function saveGeneratedFile(blob, filename, mimeType) {
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: filename,
+        types: [
+          {
+            description: "Excel 工作簿",
+            accept: { [mimeType]: [".xlsx"] },
+          },
+        ],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return "saved";
+    } catch (error) {
+      if (error?.name === "AbortError") return "cancelled";
+    }
+  }
+  downloadBackupFile(blob, filename);
+  return "downloaded";
+}
+
+async function importTasks(event) {
   const file = event.target.files?.[0];
   if (!file) return;
 
-  const shouldImport = confirm("导入备份会覆盖当前任务、生日、周期、英语学习、知识文库和商品比价数据。建议先确认当前数据已经导出到坚果云。继续导入吗？");
+  const shouldImport = await confirmDangerAction({
+    title: "导入备份",
+    message: "导入备份会覆盖当前任务、生日、周期、英语学习、知识文库和商品比价数据。建议先确认当前数据已经导出到坚果云。",
+    confirmText: "导入",
+  });
   if (!shouldImport) {
     event.target.value = "";
     return;
@@ -5892,10 +6720,14 @@ function saveImportBackup() {
   );
 }
 
-function restoreImportBackup() {
+async function restoreImportBackup() {
   const raw = readImportBackup();
   if (!raw) return;
-  const shouldRestore = confirm("这会用最近一次导入前的本机数据覆盖当前任务、生日、周期、英语学习、知识文库和商品比价数据。继续恢复吗？");
+  const shouldRestore = await confirmDangerAction({
+    title: "恢复数据",
+    message: "这会用最近一次导入前的本机数据覆盖当前任务、生日、周期、英语学习、知识文库和商品比价数据。",
+    confirmText: "恢复",
+  });
   if (!shouldRestore) return;
 
   try {
@@ -6187,9 +7019,11 @@ function normalizeShoppingRecords(records, now) {
       return {
         id: String(record.id),
         date: record.date,
+        name: typeof record.name === "string" ? record.name : "",
         platform: String(record.platform),
         totalPrice: totalPrice ?? 0,
         quantity: quantity && quantity > 0 ? quantity : 1,
+        standardCode: normalizeShoppingStandardCode(record.standardCode),
         note: typeof record.note === "string" ? record.note : "",
         createdAt: record.createdAt || now,
         updatedAt: record.updatedAt || null,
@@ -6235,14 +7069,46 @@ function normalizeEnglishGroups(groups) {
   if (!Array.isArray(groups)) return [];
   return groups
     .filter((group) => group?.title && Array.isArray(group.words))
-    .map((group) => ({
-      id: group.id || createId(),
-      title: String(group.title),
-      type: typeof group.type === "string" ? group.type : "自定义",
-      words: group.words.map(String).filter(Boolean),
-      note: typeof group.note === "string" ? group.note : "",
-      createdAt: group.createdAt || new Date().toISOString(),
-    }));
+    .map((group) => {
+      const defaultPartSpeech = typeof group.defaultPartSpeech === "string" ? group.defaultPartSpeech : "";
+      return {
+        id: group.id || createId(),
+        title: String(group.title),
+        type: typeof group.type === "string" ? group.type : "自定义",
+        defaultPartSpeech,
+        words: normalizeEnglishGroupWords(group.words, defaultPartSpeech),
+        note: typeof group.note === "string" ? group.note : "",
+        createdAt: group.createdAt || new Date().toISOString(),
+        updatedAt: group.updatedAt || null,
+      };
+    });
+}
+
+function normalizeEnglishGroupWords(words, defaultPartSpeech = "") {
+  if (!Array.isArray(words)) return [];
+  return words
+    .map((item) => {
+      if (typeof item === "string") {
+        const word = item.trim();
+        if (!word) return null;
+        return {
+          id: createId(),
+          word,
+          partSpeech: defaultPartSpeech,
+          translation: "",
+          note: "",
+        };
+      }
+      if (!item?.word) return null;
+      return {
+        id: item.id || createId(),
+        word: String(item.word),
+        partSpeech: typeof item.partSpeech === "string" ? item.partSpeech : defaultPartSpeech,
+        translation: typeof item.translation === "string" ? item.translation : "",
+        note: typeof item.note === "string" ? item.note : "",
+      };
+    })
+    .filter(Boolean);
 }
 
 function normalizeKnowledge(knowledge = {}) {
@@ -6553,7 +7419,7 @@ function seedTasks() {
 
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js?v=63").catch(() => {});
+    navigator.serviceWorker.register("./sw.js?v=68").catch(() => {});
   }
 }
 
