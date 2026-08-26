@@ -1,12 +1,14 @@
-const cacheName = "workbuddy-v68";
+const cacheName = "workbuddy-v72";
 const assets = [
   "./",
   "./index.html",
-  "./styles.css?v=68",
-  "./app.js?v=68",
+  "./styles.css?v=72",
+  "./app.js?v=72",
   "./english-wordbanks.js",
-  "./manifest.webmanifest?v=68",
+  "./manifest.webmanifest?v=72",
   "./icon.svg",
+  "./icon-192.png",
+  "./icon-512.png",
 ];
 
 self.addEventListener("install", (event) => {

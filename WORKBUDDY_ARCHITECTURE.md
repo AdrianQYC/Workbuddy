@@ -93,6 +93,7 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - 页面内模态框使用 `openWorkbuddyModal()` 作为底座，背景压暗并阻止背景操作。
 - 删除、导入、恢复等危险确认使用 `confirmDangerAction()`，不要新增浏览器原生 `confirm()`。
 - 需要编辑多个字段的普通输入场景，应优先做 Workbuddy 风格表单模态框，不要用连续 `prompt()`。
+- 非阻断的成功、取消和轻提醒反馈可使用 `showWorkbuddyToast()` 轻提示；危险确认和需要用户处理的失败继续使用 Workbuddy 模态框。
 
 ## 每日计划
 
@@ -187,22 +188,29 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - 系统自带 `未分类`，id 固定为 `uncategorized`。
 - `未分类` 不允许删除，但允许重命名和参与手动排序。
 - `未分类` 内部文档和其它分类内文档一样，允许手动排序、编辑、归类、导出和删除。
+- 分类支持无限级文件夹，分类对象使用 `parentId` 指向父文件夹；旧分类没有 `parentId` 时按根文件夹兼容。
+- 子文件夹和直接文档可以在同一个父文件夹下并列存在；子文件夹内文档不在父文件夹直接文档列表里重复显示。
+- 当前版本通过“移动到”菜单改变文件夹父级；分类手动排序只在同一父文件夹下生效。
+- 移动文件夹时只修改该文件夹的 `parentId` 和同级 `order`，子文件夹和文档关系随树结构自然移动；必须禁止把分类移动到自己或自己的子分类下。
 - 一篇文档可以属于多个分类，但正文只保存一份，不复制多份。
 - 知识文库固定导航保留“新建”；编辑已有文档是进入同一个编辑器的临时状态，不作为固定导航项。
+- 知识文库编辑器使用运行期标签页状态 `knowledgeEditorTabs` 和 `activeKnowledgeEditorTabId`；多个新建/编辑文档可以同时打开，未保存内容只保存在当前页面内存，不写入 `workbuddy.knowledge.v1`。
+- 打开已有文档时，如果对应标签已存在，应切换到已有标签而不是重复打开；关闭全部编辑标签后自动回到分类页。
+- 文档保存后通过 `verifyKnowledgeDocumentSaved()` 从 `localStorage` 读回当前文档并核对标题、正文和分类；成功后清除未保存标记并显示轻提示，失败时保留标签内容和未保存标记并弹出提示。
 - 文档编辑页的编辑/预览切换只影响界面状态，保存的数据仍然是原始 Markdown 文本。
-- Markdown 预览由本地 `renderMarkdownPreview()` 轻量渲染，不引入外部依赖，预览 HTML 必须先转义用户内容再插入页面。
+- Markdown 预览由本地 `renderMarkdownPreview()` 轻量渲染，不引入外部依赖，支持常用标题、列表、引用、代码块和管道表格；预览 HTML 必须先转义用户内容再插入页面。
 - 删除文档或分类先进入回收站。
-- 分类删除时，只属于该分类的文档进入回收站；同时属于其它分类的文档只移除该分类关系。
-- 回收站恢复应尽量回到删除前的分类关系。
-- 分类导出为 `.zip`，里面按分类文件夹保存 `.md` 文档。
+- 分类删除按整棵子树处理；删除上级文件夹时默认删除下级文件夹，只属于被删树的文档进入回收站，同时属于其它分类的文档只移除被删树内分类关系。
+- 回收站恢复应尽量回到删除前的分类层级和文档分类关系。
+- 分类导出为 `.zip`，里面按文件夹层级保存 `.md` 文档。
 - 单篇文档导出为 `.md`。
 - 分类页批量模式只保存临时选择状态，不写入 `workbuddy.knowledge.v1`。
-- 批量删除分类时，`未分类` 不能删除；只属于被删分类的文档进入回收站，多分类文档只移除被删分类关系。
+- 批量模式选择分类时，应同步选择该分类的全部下级分类和下级文档；取消分类时同步取消这棵子树。只单独选择部分文档时，分类只显示半选状态，不自动加入 `selectedCategories`，避免批量删除误删分类。
+- 批量删除分类时，`未分类` 不能删除；选中的父文件夹按子树删除，只属于被删树的文档进入回收站，多分类文档只移除被删树内分类关系。
 - 批量删除中如果文档被单独选中，应按“删除文档”处理，避免通过恢复分类时意外恢复用户明确删除的文档。
 - 批量移动当前只移动文档，不移动分类；添加到目标分类时应避免把已分类文档继续留在 `未分类`。
 - 批量导出统一导出 `.zip`，选中文件夹按文件夹路径导出，单独选中的文档放入 `选中文档/`。
 - 回收站批量恢复复用单项恢复逻辑；回收站批量彻底删除必须二次确认。
-- 后续如增加文件夹套文件夹，分类应增加 `parentId`，并禁止把分类移动到自己或自己的子分类下。
 - 移动端暂时采用同一套代码的响应式布局；知识文库手机端优先浏览、搜索和备份，复杂 Markdown 新建/编辑后续再做全屏编辑体验，不拆成电脑/手机两个版本。
 
 改动知识文库时，重点检查：
@@ -210,6 +218,9 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - `renderKnowledgeShell()`
 - `createKnowledgeCategoriesPanel()`
 - `createKnowledgeEditorPanel()`
+- `createKnowledgeOpenTabs()`
+- `openKnowledgeEditor()`
+- `closeKnowledgeEditorTab()`
 - `createKnowledgeTrashPanel()`
 - `saveKnowledgeEditor()`
 - `deleteKnowledgeCategory()`
@@ -233,10 +244,12 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - 使用独立数据键 `workbuddy.shopping.v1`，不要混入任务、英语或知识文库数据。
 - 购物数据只来自用户手动填写，不接入购物平台账号，不做自动抓取。
 - 分类是两级结构：一级分类保存在 `categories`，二级分类保存在 `subcategories`，商品通过 `categoryId` 和可空的 `subcategoryId` 归类。
-- 商品的数量单位保存在商品层级，购买记录保存日期、本次名称、平台、总价、数量、可选国标号和备注。
+- 商品的数量单位、默认国标号和商品总备注保存在商品层级，购买记录保存日期、本次名称、平台、总价、数量、可选本次国标号和本次备注。
 - 购买记录里的 `name` 是本次购买名称，用于同一商品词条下区分不同品牌或规格；旧记录没有 `name` 时，显示层用商品词条名称兜底。
-- 购买记录里的 `standardCode` 只保存 `GB/T` 后面的编号，界面展示时再拼成 `GB/T 编号`；为空时不显示。
+- 商品和购买记录里的 `standardCode` 都只保存 `GB/T` 后面的编号，界面展示时再拼成 `GB/T 编号`；为空时不显示。
+- 新增购买记录时，记录国标默认带入商品层 `standardCode`，但保存时仍写入购买记录自己的 `standardCode`，方便单次购买覆盖。
 - 购买记录平台使用固定下拉选项：淘宝、京东、拼多多、抖音、盒马、阿里巴巴。
+- 购买记录新增和修改使用商品卡片内的行内表单；新增时表单位于记录列表顶部，修改时当前记录行切换为编辑态，不使用浏览器原生连续 `prompt()`。
 - 单价不单独保存，渲染时用 `totalPrice / quantity` 临时计算。
 - 总价默认单位为元；数量单位是自由文本，用户不填写时不显示 `/单位`。
 - 分类区采用左侧目录式布局，一级分类和二级分类分区显示；商品搜索和排序属于右侧商品列表工具栏。
@@ -252,8 +265,10 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - `createShoppingSubcategoryTabs()`
 - `createShoppingProductForm()`
 - `createShoppingProductCard()`
-- `createShoppingRecordForm()`
+- `createShoppingRecordSection()`
+- `createShoppingRecordEditor()`
 - `createShoppingRecordRow()`
+- `updateShoppingRecord()`
 - `openShoppingExportModal()`
 - `createShoppingWorkbookBlob()`
 - `shoppingVisibleProducts()`
@@ -304,14 +319,14 @@ C:\Users\qyc22\Documents\菜单\Workbuddy\关闭Workbuddy服务.cmd
 `index.html` 中 CSS/JS 使用查询参数版本号，例如：
 
 ```html
-./styles.css?v=68
-./app.js?v=68
+./styles.css?v=72
+./app.js?v=72
 ```
 
 `sw.js` 中也有缓存名，例如：
 
 ```js
-const cacheName = "workbuddy-v68";
+const cacheName = "workbuddy-v72";
 ```
 
 每次修改前端文件后，通常需要同步提升版本号，避免 Chrome 桌面版混用旧缓存。
