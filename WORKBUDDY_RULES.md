@@ -32,6 +32,9 @@
 - 不自动上传 GitHub。
 - 用户确认满意后，再询问是否保存本地 Git 版本。
 - 用户单独确认上传后，才能 `git push`。
+- `git commit` 只生成本地代码快照，`git push` 只把提交上传到 GitHub 分支；两者都不会自动创建 GitHub Release。
+- 创建 GitHub Release 还必须单独创建版本标签和 Release 页面；只有用户明确确认发布某个版本后才能执行，并在完成后同时反馈提交哈希、标签和 Release 地址。
+- 用户要求发布历史版本时，先根据 Git 提交和 `VERSION_HISTORY.md` 列出可准确对应的候选版本与提交，不得把没有独立代码快照的缓存编号擅自当成独立 Release；得到确认前不创建标签或 Release。
 - 提交或上传前，要说明修改了哪些文件、是否包含私人数据、是否已更新必要文档。
 - 每次提升本地缓存版本号时，必须同步更新 `VERSION_HISTORY.md` 中对应的本地缓存版本说明；不能等到上传 GitHub 时再补。
 - 每次确认上传 GitHub 前，还要检查 `VERSION_HISTORY.md` 是否需要补充 Git 提交或 GitHub 发布说明。
