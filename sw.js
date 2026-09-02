@@ -1,11 +1,11 @@
-const cacheName = "workbuddy-v72";
+const cacheName = "workbuddy-v73";
 const assets = [
   "./",
   "./index.html",
-  "./styles.css?v=72",
-  "./app.js?v=72",
+  "./styles.css?v=73",
+  "./app.js?v=73",
   "./english-wordbanks.js",
-  "./manifest.webmanifest?v=72",
+  "./manifest.webmanifest?v=73",
   "./icon.svg",
   "./icon-192.png",
   "./icon-512.png",

@@ -4,7 +4,7 @@
 
 ## 版本概念
 
-- 本地缓存版本：`index.html`、`app.js`、`styles.css`、`sw.js` 里使用的 `vXX`，主要用于让浏览器加载新文件，当前是 `v72`。
+- 本地缓存版本：`index.html`、`app.js`、`styles.css`、`sw.js` 里使用的 `vXX`，主要用于让浏览器加载新文件，当前是 `v73`。
 - Git 版本：每次 `git commit` 生成的代码快照，用提交哈希识别，例如 `209d40a`。
 - GitHub 版本：已经推送到 GitHub `main` 分支上的 Git 提交。当前项目还没有单独建立 Git tag 或 GitHub Release。
 
@@ -65,6 +65,10 @@
 ### v72
 
 补全 Workbuddy 图标资源。基于现有 `icon.svg` 生成 `icon-192.png`、`icon-512.png` 和 `Workbuddy.ico`，更新网页 manifest、页面图标引用和离线缓存，提升浏览器安装、GitHub Pages 访问和 Windows 桌面快捷方式图标的稳定性。
+
+### v73
+
+知识文库新增 ZIP 导入。支持在浏览器本地解析常见 ZIP，导入 `.md`、`.markdown` 和 `.txt` 文档；导入前显示文档、文件夹和忽略文件数量，并可选择导入到顶层、已有文件夹、未分类或新建文件夹。ZIP 内文件夹结构会映射为知识文库嵌套文件夹，同级同名文件夹复用，同名文档标题自动追加序号且不覆盖已有文档。
 
 ## Git / GitHub 提交记录
 

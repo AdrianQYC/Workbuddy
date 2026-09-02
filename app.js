@@ -3566,25 +3566,41 @@ async function purgeSelectedKnowledgeTrash() {
   showWorkbuddyToast({ title: "已彻底删除" });
 }
 
-function importKnowledgeDocument(event) {
+async function importKnowledgeDocument(event) {
   const file = event.target.files?.[0];
   if (!file) return;
-  const isSupported = /\.(md|txt)$/i.test(file.name) || ["text/markdown", "text/plain"].includes(file.type);
+  const isZip = /\.zip$/i.test(file.name) || file.type === "application/zip" || file.type === "application/x-zip-compressed";
+  const isSupported = isZip || /\.(md|markdown|txt)$/i.test(file.name) || ["text/markdown", "text/plain"].includes(file.type);
   if (!isSupported) {
     showWorkbuddyToast({
       title: "文件格式不支持",
-      message: "请导入 .md 或 .txt 文件。",
+      message: "请导入 .md、.txt 或 .zip 文件。",
       tone: "warning",
     });
     event.target.value = "";
     return;
   }
-  const reader = new FileReader();
-  reader.onload = () => {
-    const title = file.name.replace(/\.(md|txt)$/i, "");
+
+  if (isZip) {
+    try {
+      await importKnowledgeZip(file);
+    } catch (error) {
+      showWorkbuddyMessageModal({
+        title: "ZIP 导入失败",
+        message: error?.message || "ZIP 文件读取失败，请重新选择文件。",
+      });
+    } finally {
+      event.target.value = "";
+    }
+    return;
+  }
+
+  try {
+    const content = await file.text();
+    const title = file.name.replace(/\.(md|markdown|txt)$/i, "");
     const tab = createKnowledgeEditorDraft({
       title,
-      content: String(reader.result || ""),
+      content,
       sourceFileName: file.name,
       dirty: true,
     });
@@ -3594,15 +3610,332 @@ function importKnowledgeDocument(event) {
     event.target.value = "";
     render();
     showWorkbuddyToast({ title: "已导入到新标签" });
-  };
-  reader.onerror = () => {
+  } catch {
     showWorkbuddyMessageModal({
       title: "导入失败",
       message: "文件读取失败，请重新选择文件。",
     });
     event.target.value = "";
+  }
+}
+
+async function importKnowledgeZip(file) {
+  const parsed = await readKnowledgeZip(file);
+  if (!parsed.documents.length) {
+    throw new Error("这个 ZIP 里没有可导入的 Markdown 或 TXT 文档。");
+  }
+  openKnowledgeZipImportModal(file, parsed);
+}
+
+async function readKnowledgeZip(file) {
+  const buffer = await file.arrayBuffer();
+  const view = new DataView(buffer);
+  const eocdOffset = findZipEndOfCentralDirectory(view);
+  if (eocdOffset < 0) throw new Error("无法识别这个 ZIP 文件。");
+
+  const entryCount = view.getUint16(eocdOffset + 10, true);
+  const centralOffset = view.getUint32(eocdOffset + 16, true);
+  const documents = [];
+  let ignoredEntries = 0;
+  let pointer = centralOffset;
+
+  for (let index = 0; index < entryCount; index += 1) {
+    if (view.getUint32(pointer, true) !== 0x02014b50) throw new Error("ZIP 目录结构不完整。");
+    const flags = view.getUint16(pointer + 8, true);
+    const method = view.getUint16(pointer + 10, true);
+    const compressedSize = view.getUint32(pointer + 20, true);
+    const nameLength = view.getUint16(pointer + 28, true);
+    const extraLength = view.getUint16(pointer + 30, true);
+    const commentLength = view.getUint16(pointer + 32, true);
+    const localOffset = view.getUint32(pointer + 42, true);
+    const rawName = new Uint8Array(buffer, pointer + 46, nameLength);
+    const entryName = decodeZipFileName(rawName, flags);
+    pointer += 46 + nameLength + extraLength + commentLength;
+
+    const normalizedPath = normalizeKnowledgeZipPath(entryName);
+    if (!normalizedPath || normalizedPath.endsWith("/")) continue;
+    if (!isKnowledgeImportDocumentPath(normalizedPath)) {
+      ignoredEntries += 1;
+      continue;
+    }
+    if (view.getUint32(localOffset, true) !== 0x04034b50) throw new Error("ZIP 文件条目损坏。");
+    if (![0, 8].includes(method)) {
+      throw new Error("ZIP 里有暂不支持的压缩方式，请重新用常见 ZIP 格式压缩。");
+    }
+    const localNameLength = view.getUint16(localOffset + 26, true);
+    const localExtraLength = view.getUint16(localOffset + 28, true);
+    const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+    const compressed = new Uint8Array(buffer, dataStart, compressedSize);
+    const contentBytes = method === 0 ? compressed : await inflateZipDeflateRaw(compressed);
+    const content = new TextDecoder("utf-8").decode(contentBytes).replace(/^\uFEFF/, "");
+    const parts = normalizedPath.split("/");
+    const fileName = parts.at(-1) || "未命名文档.md";
+    documents.push({
+      path: normalizedPath,
+      fileName,
+      title: fileName.replace(/\.(md|markdown|txt)$/i, "") || "未命名文档",
+      folderSegments: parts.slice(0, -1),
+      content,
+    });
+  }
+
+  const folderPaths = new Set();
+  documents.forEach((doc) => {
+    doc.folderSegments.forEach((_, index) => {
+      folderPaths.add(doc.folderSegments.slice(0, index + 1).join("/"));
+    });
+  });
+  return {
+    documents,
+    ignoredEntries,
+    folderCount: folderPaths.size,
+    hasFolderStructure: documents.some((doc) => doc.folderSegments.length > 0),
   };
-  reader.readAsText(file);
+}
+
+function findZipEndOfCentralDirectory(view) {
+  const minOffset = Math.max(0, view.byteLength - 0xffff - 22);
+  for (let offset = view.byteLength - 22; offset >= minOffset; offset -= 1) {
+    if (view.getUint32(offset, true) === 0x06054b50) return offset;
+  }
+  return -1;
+}
+
+function decodeZipFileName(bytes, flags) {
+  const encoding = flags & 0x0800 ? "utf-8" : "gbk";
+  try {
+    return new TextDecoder(encoding).decode(bytes);
+  } catch {
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+}
+
+function normalizeKnowledgeZipPath(path) {
+  const normalized = String(path || "").replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!normalized || normalized.startsWith("__MACOSX/")) return "";
+  const parts = normalized.split("/").filter(Boolean);
+  if (!parts.length || parts.some((part) => part === "." || part === "..")) return "";
+  const fileName = parts.at(-1) || "";
+  if (fileName.startsWith("._")) return "";
+  return parts.join("/");
+}
+
+function isKnowledgeImportDocumentPath(path) {
+  return /\.(md|markdown|txt)$/i.test(path);
+}
+
+async function inflateZipDeflateRaw(bytes) {
+  if (!("DecompressionStream" in window)) {
+    throw new Error("当前浏览器不支持解压这个 ZIP，请使用最新版 Chrome 打开 Workbuddy。");
+  }
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+function openKnowledgeZipImportModal(file, parsed) {
+  const form = document.createElement("form");
+  form.className = "knowledge-zip-import-form";
+  const modeOptions = parsed.hasFolderStructure
+    ? `
+      <option value="zip-root">导入到顶层</option>
+      <option value="zip-existing">导入到已有文件夹下</option>
+    `
+    : `
+      <option value="flat-uncategorized">导入到未分类</option>
+      <option value="flat-existing">导入到已有文件夹</option>
+      <option value="flat-new-root">新建一级文件夹后导入</option>
+      <option value="flat-new-child">在已有文件夹下新建子文件夹后导入</option>
+    `;
+  form.innerHTML = `
+    <div class="knowledge-zip-summary">
+      <strong>${escapeHtml(file.name)}</strong>
+      <span>${parsed.documents.length} 篇文档 · ${parsed.folderCount} 个文件夹${parsed.ignoredEntries ? ` · 忽略 ${parsed.ignoredEntries} 个非 Markdown 文件` : ""}</span>
+    </div>
+    <label class="select-field">
+      <span>导入方式</span>
+      <select name="mode">
+        ${modeOptions}
+      </select>
+    </label>
+    <label class="select-field" data-field="target">
+      <span>目标文件夹</span>
+      <select name="target">
+        ${knowledgeCategoryTargetOptionsHtml()}
+      </select>
+    </label>
+    <label class="date-field" data-field="folder-name">
+      <span>文件夹名</span>
+      <input name="folderName" type="text" maxlength="40" value="${escapeHtml(file.name.replace(/\.zip$/i, ""))}" />
+    </label>
+  `;
+  const updateFields = () => {
+    const mode = form.elements.mode.value;
+    const needsTarget = mode === "zip-existing" || mode === "flat-existing" || mode === "flat-new-child";
+    const needsName = mode === "flat-new-root" || mode === "flat-new-child";
+    form.querySelector('[data-field="target"]').hidden = !needsTarget;
+    form.querySelector('[data-field="folder-name"]').hidden = !needsName;
+  };
+  form.elements.mode.addEventListener("change", updateFields);
+
+  const cancel = document.createElement("button");
+  cancel.className = "cancel-button";
+  cancel.type = "button";
+  cancel.textContent = "取消";
+  const confirm = document.createElement("button");
+  confirm.className = "primary-button";
+  confirm.type = "submit";
+  confirm.textContent = "导入";
+  const modal = openWorkbuddyModal({
+    title: "导入 ZIP",
+    body: form,
+    actions: [cancel, confirm],
+    initialFocusSelector: 'select[name="mode"]',
+  });
+  cancel.addEventListener("click", modal.close);
+  confirm.addEventListener("click", () => form.requestSubmit());
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const options = {
+      mode: form.elements.mode.value,
+      targetId: form.elements.target.value,
+      folderName: form.elements.folderName.value.trim(),
+    };
+    if ((options.mode === "flat-new-root" || options.mode === "flat-new-child") && !options.folderName) {
+      showWorkbuddyToast({ title: "请填写文件夹名", tone: "warning" });
+      return;
+    }
+    importKnowledgeZipDocuments(parsed, options);
+    modal.close();
+  });
+  updateFields();
+}
+
+function knowledgeCategoryTargetOptionsHtml() {
+  return sortedKnowledgeCategoryTree()
+    .map(({ category, depth }) => {
+      const prefix = depth ? `${"　".repeat(depth)}` : "";
+      return `<option value="${escapeHtml(category.id)}">${escapeHtml(prefix + knowledgeCategoryName(category.id))}</option>`;
+    })
+    .join("");
+}
+
+function importKnowledgeZipDocuments(parsed, options) {
+  const now = new Date().toISOString();
+  const importedCategoryIds = new Set();
+  const touchedCategoryIds = new Set();
+  const usedTitles = new Set(state.knowledge.documents.map((doc) => doc.title));
+  let importedDocuments = 0;
+  let flatCategoryId = null;
+
+  if (options.mode === "flat-new-root") {
+    flatCategoryId = createImportedKnowledgeCategory(uniqueKnowledgeCategoryName(options.folderName, null), null, now, importedCategoryIds);
+  }
+  if (options.mode === "flat-new-child") {
+    const parentId = knowledgeCategoryById(options.targetId) ? options.targetId : "uncategorized";
+    flatCategoryId = createImportedKnowledgeCategory(uniqueKnowledgeCategoryName(options.folderName, parentId), parentId, now, importedCategoryIds);
+  }
+
+  parsed.documents.forEach((entry) => {
+    let categoryId = "uncategorized";
+    if (parsed.hasFolderStructure) {
+      const baseParentId = options.mode === "zip-existing" && knowledgeCategoryById(options.targetId) ? options.targetId : null;
+      if (entry.folderSegments.length) {
+        categoryId = ensureImportedKnowledgeCategoryPath(entry.folderSegments, baseParentId, now, importedCategoryIds);
+      } else {
+        categoryId = baseParentId || "uncategorized";
+      }
+    } else if (options.mode === "flat-existing") {
+      categoryId = knowledgeCategoryById(options.targetId) ? options.targetId : "uncategorized";
+    } else if (options.mode === "flat-new-root" || options.mode === "flat-new-child") {
+      categoryId = flatCategoryId || "uncategorized";
+    }
+
+    const title = uniqueKnowledgeDocumentTitle(entry.title, usedTitles);
+    usedTitles.add(title);
+    state.knowledge.documents.push({
+      id: createId(),
+      title,
+      content: entry.content,
+      categoryIds: [categoryId],
+      orderByCategory: { [categoryId]: nextKnowledgeDocumentOrder(categoryId) },
+      sourceFileName: entry.path,
+      createdAt: now,
+      updatedAt: now,
+    });
+    touchedCategoryIds.add(categoryId);
+    importedDocuments += 1;
+  });
+
+  touchedCategoryIds.forEach((categoryId) => {
+    knowledgeCategoryPathIds(categoryId).forEach((id) => importedCategoryIds.add(id));
+  });
+  importedCategoryIds.forEach((id) => state.expandedKnowledgeCategories.add(id));
+  state.knowledgeView = "categories";
+  state.knowledgeSearch = "";
+  saveKnowledge();
+  render();
+  showWorkbuddyToast({
+    title: "ZIP 已导入",
+    message: `新增 ${importedDocuments} 篇文档${importedCategoryIds.size ? `、${importedCategoryIds.size} 个文件夹` : ""}`,
+  });
+}
+
+function ensureImportedKnowledgeCategoryPath(segments, parentId, now, importedCategoryIds) {
+  let currentParentId = parentId || null;
+  segments.forEach((segment) => {
+    const name = segment.trim() || "未命名文件夹";
+    const existing = state.knowledge.categories.find(
+      (category) => knowledgeCategoryParentId(category) === currentParentId && category.name === name,
+    );
+    currentParentId = existing
+      ? existing.id
+      : createImportedKnowledgeCategory(name, currentParentId, now, importedCategoryIds);
+  });
+  return currentParentId || "uncategorized";
+}
+
+function createImportedKnowledgeCategory(name, parentId, now, importedCategoryIds) {
+  const id = createId();
+  state.knowledge.categories.push({
+    id,
+    name: name || "未命名文件夹",
+    parentId: parentId || null,
+    order: nextKnowledgeCategoryOrder(parentId || null),
+    createdAt: now,
+    updatedAt: now,
+  });
+  importedCategoryIds.add(id);
+  if (parentId) importedCategoryIds.add(parentId);
+  return id;
+}
+
+function uniqueKnowledgeCategoryName(name, parentId) {
+  const base = (name || "新建文件夹").trim() || "新建文件夹";
+  const siblings = new Set(
+    state.knowledge.categories
+      .filter((category) => knowledgeCategoryParentId(category) === (parentId || null))
+      .map((category) => category.name),
+  );
+  if (!siblings.has(base)) return base;
+  let index = 2;
+  let candidate = `${base} (${index})`;
+  while (siblings.has(candidate)) {
+    index += 1;
+    candidate = `${base} (${index})`;
+  }
+  return candidate;
+}
+
+function uniqueKnowledgeDocumentTitle(title, usedTitles) {
+  const base = (title || "未命名文档").trim() || "未命名文档";
+  if (!usedTitles.has(base)) return base;
+  let index = 2;
+  let candidate = `${base} (${index})`;
+  while (usedTitles.has(candidate)) {
+    index += 1;
+    candidate = `${base} (${index})`;
+  }
+  return candidate;
 }
 
 function exportKnowledgeDocument(documentId) {
@@ -8352,7 +8685,7 @@ function seedTasks() {
 
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js?v=72").catch(() => {});
+    navigator.serviceWorker.register("./sw.js?v=73").catch(() => {});
   }
 }
 

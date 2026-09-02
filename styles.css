@@ -2175,6 +2175,11 @@ textarea:focus {
   gap: 12px;
 }
 
+.knowledge-zip-import-form {
+  display: grid;
+  gap: 12px;
+}
+
 .knowledge-move-summary {
   display: grid;
   gap: 4px;
@@ -2190,6 +2195,25 @@ textarea:focus {
 }
 
 .knowledge-move-summary span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.knowledge-zip-summary {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(20, 32, 29, 0.08);
+  border-radius: 8px;
+  background: #f8fbfa;
+}
+
+.knowledge-zip-summary strong {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.knowledge-zip-summary span {
   color: var(--muted);
   font-size: 13px;
 }

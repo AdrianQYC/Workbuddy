@@ -45,7 +45,7 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 
 - `http://localhost:5173`
 - `http://127.0.0.1:5173`
-- `file:///C:/Users/qyc22/Documents/菜单/Workbuddy/index.html`
+- `file:///D:/Codex_projects/misc/Workbuddy/index.html`
 - `https://adrianqyc.github.io/Workbuddy/`
 
 后续应固定推荐 `http://localhost:5173/index.html`。
@@ -199,6 +199,10 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - 文档保存后通过 `verifyKnowledgeDocumentSaved()` 从 `localStorage` 读回当前文档并核对标题、正文和分类；成功后清除未保存标记并显示轻提示，失败时保留标签内容和未保存标记并弹出提示。
 - 文档编辑页的编辑/预览切换只影响界面状态，保存的数据仍然是原始 Markdown 文本。
 - Markdown 预览由本地 `renderMarkdownPreview()` 轻量渲染，不引入外部依赖，支持常用标题、列表、引用、代码块和管道表格；预览 HTML 必须先转义用户内容再插入页面。
+- 知识文库单篇导入支持 `.md`、`.markdown` 和 `.txt`，导入后先进编辑标签，确认保存后才写入 `workbuddy.knowledge.v1`。
+- ZIP 导入使用浏览器本地解析，不依赖在线服务；支持常见未压缩和 Deflate ZIP，只导入 `.md`、`.markdown`、`.txt`，其它文件忽略并在预览里提示数量。
+- ZIP 带文件夹结构时，可导入到顶层或已有文件夹下，ZIP 内文件夹按层级建立，同级同名文件夹复用；ZIP 散装文档可导入未分类、已有文件夹，或新建一级/子文件夹后导入。
+- ZIP 导入只新增文档，不覆盖已有文档；同名文档标题自动追加序号。
 - 删除文档或分类先进入回收站。
 - 分类删除按整棵子树处理；删除上级文件夹时默认删除下级文件夹，只属于被删树的文档进入回收站，同时属于其它分类的文档只移除被删树内分类关系。
 - 回收站恢复应尽量回到删除前的分类层级和文档分类关系。
@@ -287,13 +291,13 @@ C:\Windows\System32\cmd.exe
 快捷方式参数是：
 
 ```text
-/c ""C:\Users\qyc22\Documents\菜单\Workbuddy\启动Workbuddy.cmd""
+/c ""D:\Codex_projects\misc\Workbuddy\启动Workbuddy.cmd""
 ```
 
 这个 cmd 会运行：
 
 ```text
-C:\Users\qyc22\Documents\菜单\Workbuddy\start-workbuddy.ps1
+D:\Codex_projects\misc\Workbuddy\start-workbuddy.ps1
 ```
 
 启动脚本做的事：
@@ -311,7 +315,7 @@ C:\Users\qyc22\Documents\菜单\Workbuddy\start-workbuddy.ps1
 手动关闭服务使用：
 
 ```text
-C:\Users\qyc22\Documents\菜单\Workbuddy\关闭Workbuddy服务.cmd
+D:\Codex_projects\misc\Workbuddy\关闭Workbuddy服务.cmd
 ```
 
 ## 缓存和版本号
@@ -319,14 +323,14 @@ C:\Users\qyc22\Documents\菜单\Workbuddy\关闭Workbuddy服务.cmd
 `index.html` 中 CSS/JS 使用查询参数版本号，例如：
 
 ```html
-./styles.css?v=72
-./app.js?v=72
+./styles.css?v=73
+./app.js?v=73
 ```
 
 `sw.js` 中也有缓存名，例如：
 
 ```js
-const cacheName = "workbuddy-v72";
+const cacheName = "workbuddy-v73";
 ```
 
 每次修改前端文件后，通常需要同步提升版本号，避免 Chrome 桌面版混用旧缓存。
