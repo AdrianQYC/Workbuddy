@@ -6,7 +6,7 @@
 
 - 本地缓存版本：`index.html`、`app.js`、`styles.css`、`sw.js` 里使用的 `vXX`，主要用于让浏览器加载新文件，当前是 `v73`。
 - Git 版本：每次 `git commit` 生成的代码快照，用提交哈希识别，例如 `209d40a`。
-- GitHub 版本：已经推送到 GitHub `main` 分支上的 Git 提交。当前项目还没有单独建立 Git tag 或 GitHub Release。
+- GitHub 版本：已经推送到 GitHub `main` 分支上的 Git 提交。当前项目已为 9 个历史代码快照建立 Git tag 和 GitHub Release，包括 5 个正式版本和 4 个早期功能里程碑。
 
 ## 本地缓存版本
 
@@ -72,18 +72,17 @@
 
 ## Git / GitHub 提交记录
 
-当前仓库尚未使用 Git tag 或 GitHub Release，因此 GitHub 发布记录先按 `main` 分支提交记录理解。
+当前仓库已为以下 9 个历史代码快照建立 Git tag 和 GitHub Release。`bebc8b2` 仅更新缓存，`e3f468b` 仅更新文档，因此不单独建立 Release。
 
-- `acf1e32` - Initial Workbuddy app：建立 Workbuddy 初始版本，包含每日计划的基础任务管理。
-- `c4ced0e` - Add canceled task records：新增任务取消记录，保留取消原因和原日期。
-- `bebc8b2` - Bust Workbuddy asset cache：更新前端资源缓存版本，避免浏览器继续使用旧文件。
-- `74d26e5` - Add collapsible schedule overview：优化日程栏分组和折叠展示。
-- `c9db69f` - Add Workbuddy English module：新增每日英语模块，支持词库、今日学习、复习和词组。
-- `209d40a` - Release Workbuddy knowledge and local startup update：发布知识文库模块，并完善本地启动脚本和桌面运行方式。
-- `b35d373` - Release Workbuddy v63 updates：将周期任务、商品比价、统一排序、备注清单和按钮统一等本地累计功能同步到 GitHub。
-- `e3f468b` - Update version history maintenance rules：补充版本说明维护规则，明确提升缓存版本时同步更新 `VERSION_HISTORY.md`。
-- `v68 本次发布` - Release Workbuddy v68 updates：同步商品比价导出、每日英语自定义词组结构化编辑、Workbuddy 页面内模态框、商品比价分类 UI 和流程文档优化等本地累计功能。具体提交哈希以本次发布后的 Git 记录为准。
-- `v72 本次发布` - Release Workbuddy v72 updates：同步知识文库 Markdown 表格预览、多文档标签页、保存校验、嵌套文件夹、文件夹移动、文件夹操作菜单收纳、Workbuddy 图标资源，以及商品比价和轻提示相关累计改动。具体提交哈希以本次发布后的 Git 记录为准。
+- `early-initial` -> `acf1e32` - Initial Workbuddy app：建立 Workbuddy 初始版本，包含每日计划的基础任务管理。
+- `early-canceled-task` -> `c4ced0e` - Add canceled task records：新增任务取消记录，保留取消原因和原日期。
+- `early-collapsible-schedule` -> `74d26e5` - Add collapsible schedule overview：优化日程栏分组和折叠展示。
+- `early-english-module` -> `c9db69f` - Add Workbuddy English module：新增每日英语模块，支持词库、今日学习、复习和词组。
+- `v50` -> `209d40a` - Release Workbuddy knowledge and local startup update：发布知识文库模块，并完善本地启动脚本和桌面运行方式。
+- `v63` -> `b35d373` - Release Workbuddy v63 updates：将周期任务、商品比价、统一排序、备注清单和按钮统一等本地累计功能同步到 GitHub。
+- `v68` -> `db89e96` - Release Workbuddy v68 updates：同步商品比价导出、每日英语自定义词组结构化编辑、Workbuddy 页面内模态框、商品比价分类 UI 和流程文档优化等本地累计功能。
+- `v72` -> `492c0c2` - Release Workbuddy v72 updates：同步知识文库 Markdown 表格预览、多文档标签页、保存校验、嵌套文件夹、文件夹移动、文件夹操作菜单收纳、Workbuddy 图标资源，以及商品比价和轻提示相关累计改动。
+- `v73` -> `d217827` - Release Workbuddy v73 updates：知识文库新增 ZIP 导入，支持批量导入文档和映射 ZIP 文件夹结构。
 
 ## 发布维护规则
 
