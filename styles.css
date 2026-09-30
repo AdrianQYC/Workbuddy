@@ -1220,6 +1220,16 @@ textarea:focus {
   gap: 8px;
 }
 
+.shopping-tertiary-category-bar {
+  margin-left: 6px;
+  padding-left: 10px;
+  border-left: 2px solid rgba(31, 138, 112, 0.16);
+}
+
+.shopping-tertiary-category-bar .shopping-category-heading {
+  color: var(--accent-dark);
+}
+
 .shopping-category-heading {
   color: var(--muted);
   font-size: 12px;
@@ -1228,7 +1238,6 @@ textarea:focus {
 
 .shopping-list-toolbar,
 .shopping-product-form,
-.shopping-unit-form,
 .shopping-record-form {
   display: flex;
   flex-wrap: wrap;
@@ -1287,7 +1296,9 @@ textarea:focus {
 
 .shopping-export-category-list,
 .shopping-export-category,
-.shopping-export-subcategory-list {
+.shopping-export-subcategory,
+.shopping-export-subcategory-list,
+.shopping-export-tertiary-list {
   display: grid;
   gap: 8px;
 }
@@ -1307,6 +1318,10 @@ textarea:focus {
 }
 
 .shopping-export-subcategory-list {
+  padding-left: 24px;
+}
+
+.shopping-export-tertiary-list {
   padding-left: 24px;
 }
 
@@ -1373,6 +1388,13 @@ textarea:focus {
 
 .shopping-subcategory-bar .shopping-tab {
   min-height: 28px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.shopping-tertiary-category-bar .shopping-tab {
+  min-height: 26px;
+  padding-left: 6px;
   color: var(--muted);
   font-size: 12px;
 }
@@ -1471,12 +1493,44 @@ textarea:focus {
   flex: 1 1 160px;
 }
 
+.shopping-product-form input::placeholder,
+.shopping-record-form input::placeholder,
+.shopping-record-form textarea::placeholder,
+.shopping-unit-inline-form input::placeholder {
+  color: var(--muted);
+  font-size: 14px;
+  opacity: 0.78;
+}
+
 .shopping-list-toolbar .select-field,
 .shopping-product-form .select-field,
 .shopping-record-form .select-field,
-.shopping-record-form .date-field,
-.shopping-unit-form .date-field {
+.shopping-record-form .date-field {
   flex: 0 1 150px;
+}
+
+.shopping-link-field {
+  display: grid;
+  flex: 1 1 320px;
+  min-width: 220px;
+  gap: 4px;
+}
+
+.shopping-link-input-row {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+}
+
+.shopping-link-input-row input {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.shopping-copy-button {
+  flex: 0 0 auto;
+  padding-inline: 10px;
+  white-space: nowrap;
 }
 
 .shopping-product-form .primary-button,
@@ -1530,6 +1584,53 @@ textarea:focus {
   align-items: center;
 }
 
+.shopping-product-unit-meta {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.shopping-unit-edit-button {
+  width: 28px;
+  height: 28px;
+  font-size: 15px;
+}
+
+.shopping-unit-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+  margin-top: 8px;
+}
+
+.shopping-unit-inline-field {
+  display: grid;
+  flex: 0 1 220px;
+  min-width: 180px;
+  gap: 4px;
+}
+
+.shopping-unit-inline-field > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.shopping-unit-inline-field input {
+  min-width: 0;
+  width: 100%;
+}
+
+.shopping-unit-inline-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .shopping-product-detail {
   display: grid;
   gap: 12px;
@@ -1537,7 +1638,6 @@ textarea:focus {
   border-top: 1px solid var(--line);
 }
 
-.shopping-product-info-panel,
 .shopping-record-section {
   display: grid;
   gap: 8px;
@@ -1561,14 +1661,75 @@ textarea:focus {
 }
 
 .shopping-record-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
   padding: 10px;
   border: 1px solid rgba(31, 138, 112, 0.18);
   border-radius: 8px;
   background: #f3faf7;
 }
 
+.shopping-record-editor-basic,
+.shopping-record-editor-commerce {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.shopping-record-editor-basic {
+  grid-template-columns: minmax(150px, 0.7fr) minmax(280px, 1.8fr);
+}
+
+.shopping-record-editor-commerce {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.shopping-packaging-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.shopping-packaging-fields .select-field,
+.shopping-packaging-fields .date-field {
+  min-width: 0;
+}
+
+.shopping-record-editor-basic > input {
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.shopping-record-editor-link {
+  min-width: 0;
+  width: 100%;
+}
+
+.shopping-note-field {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.shopping-note-field > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.shopping-note-field textarea {
+  min-height: 72px;
+}
+
 .shopping-record-editor-actions {
   display: inline-flex;
+  grid-column: 1 / -1;
   gap: 8px;
   align-items: stretch;
 }
@@ -1596,6 +1757,20 @@ textarea:focus {
   margin-top: 4px;
   color: var(--muted);
   font-size: 13px;
+}
+
+.shopping-record-link {
+  display: flex !important;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  word-break: break-all;
+}
+
+.shopping-record-link > span {
+  min-width: 0;
+  flex: 1 1 auto;
+  margin-top: 0;
 }
 
 .shopping-search-row {
@@ -3448,8 +3623,8 @@ textarea:focus {
   .recurrence-summary-controls,
   .shopping-list-toolbar,
   .shopping-product-form,
-  .shopping-unit-form,
   .shopping-record-form,
+  .shopping-unit-inline-form,
   .shopping-inline-form {
     flex-direction: column;
   }
@@ -3483,7 +3658,10 @@ textarea:focus {
   .shopping-record-form > input,
   .shopping-record-form .select-field,
   .shopping-record-form .date-field,
-  .shopping-unit-form .date-field {
+  .shopping-record-form .shopping-link-field,
+  .shopping-unit-inline-field,
+  .shopping-unit-inline-actions,
+  .shopping-unit-inline-actions button {
     flex-basis: auto;
     width: 100%;
   }
@@ -3519,6 +3697,29 @@ textarea:focus {
   }
 
   .shopping-record-editor-actions {
+    flex-direction: column;
+  }
+
+  .shopping-record-editor-basic,
+  .shopping-record-editor-commerce,
+  .shopping-packaging-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .shopping-record-editor-basic > input,
+  .shopping-record-editor-basic .select-field,
+  .shopping-record-editor-commerce .date-field,
+  .shopping-record-editor-commerce .shopping-link-field,
+  .shopping-packaging-fields .date-field,
+  .shopping-packaging-fields .select-field {
+    width: 100%;
+  }
+
+  .shopping-unit-inline-form {
+    align-items: stretch;
+  }
+
+  .shopping-unit-inline-actions {
     flex-direction: column;
   }
 

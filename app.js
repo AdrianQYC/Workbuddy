@@ -26,11 +26,13 @@ const state = {
   knowledgeView: "categories",
   shoppingCategoryId: "all",
   shoppingSubcategoryId: "all",
+  shoppingTertiaryCategoryId: "all",
   shoppingSort: "custom",
   shoppingSearch: "",
   shoppingExpandedProductId: null,
   shoppingHighlightedProductId: null,
   shoppingRenamingProductId: null,
+  shoppingEditingUnitProductId: null,
   shoppingAddingRecordProductId: null,
   shoppingEditingRecordId: null,
   knowledgeSearch: "",
@@ -1264,6 +1266,7 @@ function createShoppingCategorySidebar() {
   sidebar.className = "shopping-category-sidebar";
   sidebar.append(createShoppingCategoryTabs());
   sidebar.append(createShoppingSubcategoryTabs());
+  sidebar.append(createShoppingTertiaryCategoryTabs());
   return sidebar;
 }
 
@@ -1278,6 +1281,7 @@ function createShoppingCategoryTabs() {
   tabs.append(createShoppingTab("全部", state.shopping.products.length, state.shoppingCategoryId === "all", () => {
     state.shoppingCategoryId = "all";
     state.shoppingSubcategoryId = "all";
+    state.shoppingTertiaryCategoryId = "all";
     state.shoppingHighlightedProductId = null;
     render();
   }));
@@ -1285,6 +1289,7 @@ function createShoppingCategoryTabs() {
     tabs.append(createShoppingTab(category.name, shoppingCategoryProductCount(category.id), state.shoppingCategoryId === category.id, () => {
       state.shoppingCategoryId = category.id;
       state.shoppingSubcategoryId = "all";
+      state.shoppingTertiaryCategoryId = "all";
       state.shoppingHighlightedProductId = null;
       render();
     }, {
@@ -1316,12 +1321,14 @@ function createShoppingSubcategoryTabs() {
   tabs.className = "shopping-tabs";
   tabs.append(createShoppingTab("全部", shoppingCategoryProductCount(state.shoppingCategoryId), state.shoppingSubcategoryId === "all", () => {
     state.shoppingSubcategoryId = "all";
+    state.shoppingTertiaryCategoryId = "all";
     state.shoppingHighlightedProductId = null;
     render();
   }));
   shoppingSubcategoriesFor(state.shoppingCategoryId).forEach((subcategory) => {
     tabs.append(createShoppingTab(subcategory.name, shoppingSubcategoryProductCount(subcategory.id), state.shoppingSubcategoryId === subcategory.id, () => {
       state.shoppingSubcategoryId = subcategory.id;
+      state.shoppingTertiaryCategoryId = "all";
       state.shoppingHighlightedProductId = null;
       render();
     }, {
@@ -1331,6 +1338,50 @@ function createShoppingSubcategoryTabs() {
     }));
   });
   section.append(tabs, createShoppingSubcategoryForm(state.shoppingCategoryId));
+  return section;
+}
+
+function createShoppingTertiaryCategoryTabs() {
+  const section = document.createElement("div");
+  section.className = "shopping-category-section shopping-tertiary-category-bar";
+  const heading = document.createElement("div");
+  heading.className = "shopping-category-heading";
+  heading.textContent = "三级分类";
+  section.append(heading);
+  if (state.shoppingCategoryId === "all") {
+    const note = document.createElement("div");
+    note.className = "shopping-inline-note";
+    note.textContent = "选择二级分类后管理三级分类。";
+    section.append(note);
+    return section;
+  }
+  if (state.shoppingSubcategoryId === "all") {
+    const note = document.createElement("div");
+    note.className = "shopping-inline-note";
+    note.textContent = "选择二级分类后管理三级分类。";
+    section.append(note);
+    return section;
+  }
+
+  const tabs = document.createElement("div");
+  tabs.className = "shopping-tabs";
+  tabs.append(createShoppingTab("全部", shoppingSubcategoryProductCount(state.shoppingSubcategoryId), state.shoppingTertiaryCategoryId === "all", () => {
+    state.shoppingTertiaryCategoryId = "all";
+    state.shoppingHighlightedProductId = null;
+    render();
+  }));
+  shoppingTertiaryCategoriesFor(state.shoppingSubcategoryId).forEach((tertiaryCategory) => {
+    tabs.append(createShoppingTab(tertiaryCategory.name, shoppingTertiaryCategoryProductCount(tertiaryCategory.id), state.shoppingTertiaryCategoryId === tertiaryCategory.id, () => {
+      state.shoppingTertiaryCategoryId = tertiaryCategory.id;
+      state.shoppingHighlightedProductId = null;
+      render();
+    }, {
+      sortKey: { kind: "shopping-tertiary", subcategoryId: state.shoppingSubcategoryId, id: tertiaryCategory.id },
+      onRename: () => renameShoppingTertiaryCategory(tertiaryCategory.id),
+      onDelete: () => deleteShoppingTertiaryCategory(tertiaryCategory.id),
+    }));
+  });
+  section.append(tabs, createShoppingTertiaryCategoryForm(state.shoppingSubcategoryId));
   return section;
 }
 
@@ -1407,11 +1458,27 @@ function createShoppingSubcategoryForm(categoryId) {
   return form;
 }
 
+function createShoppingTertiaryCategoryForm(subcategoryId) {
+  const form = document.createElement("form");
+  form.className = "shopping-inline-form";
+  form.innerHTML = `
+    <input name="name" type="text" maxlength="30" placeholder="新建三级分类" />
+    <button class="save-button" type="submit">添加</button>
+  `;
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const name = form.elements.name.value.trim();
+    if (!name) return;
+    addShoppingTertiaryCategory(subcategoryId, name);
+  });
+  return form;
+}
+
 function createShoppingControls() {
   const controls = document.createElement("div");
   controls.className = "shopping-list-toolbar";
   controls.innerHTML = `
-    <input type="search" placeholder="搜索商品、本次名称、平台、国标或备注" value="${escapeHtml(state.shoppingSearch)}" />
+    <input type="search" placeholder="搜索商品、本次名称、平台、链接或备注" value="${escapeHtml(state.shoppingSearch)}" />
     <label class="select-field">
       <span>排序</span>
       <select aria-label="商品排序">
@@ -1458,16 +1525,25 @@ function createShoppingProductForm() {
       <span>二级</span>
       <select name="subcategoryId" aria-label="二级分类"></select>
     </label>
-    <input name="unit" type="text" maxlength="16" placeholder="数量单位" />
-    <label class="date-field shopping-standard-field">
-      <span>GB/T</span>
-      <input name="standardCode" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="24" placeholder="国标号" />
+    <label class="select-field">
+      <span>三级</span>
+      <select name="tertiaryCategoryId" aria-label="三级分类"></select>
     </label>
-    <input name="note" type="text" maxlength="120" placeholder="商品备注" />
+    <input name="unit" type="text" maxlength="16" placeholder="商品单位" />
     <button class="primary-button" type="submit">添加商品</button>
   `;
   const categorySelect = form.elements.categoryId;
   const subcategorySelect = form.elements.subcategoryId;
+  const tertiaryCategorySelect = form.elements.tertiaryCategoryId;
+  const renderTertiaryCategoryOptions = () => {
+    const tertiaryCategories = shoppingTertiaryCategoriesFor(subcategorySelect.value);
+    tertiaryCategorySelect.innerHTML = `<option value="">不选</option>${tertiaryCategories
+      .map((tertiaryCategory) => `<option value="${escapeHtml(tertiaryCategory.id)}">${escapeHtml(tertiaryCategory.name)}</option>`)
+      .join("")}`;
+    if (state.shoppingTertiaryCategoryId !== "all" && tertiaryCategories.some((item) => item.id === state.shoppingTertiaryCategoryId)) {
+      tertiaryCategorySelect.value = state.shoppingTertiaryCategoryId;
+    }
+  };
   const renderSubcategoryOptions = () => {
     const subcategories = shoppingSubcategoriesFor(categorySelect.value);
     subcategorySelect.innerHTML = `<option value="">不选</option>${subcategories
@@ -1476,8 +1552,10 @@ function createShoppingProductForm() {
     if (state.shoppingSubcategoryId !== "all" && subcategories.some((item) => item.id === state.shoppingSubcategoryId)) {
       subcategorySelect.value = state.shoppingSubcategoryId;
     }
+    renderTertiaryCategoryOptions();
   };
   categorySelect.addEventListener("change", renderSubcategoryOptions);
+  subcategorySelect.addEventListener("change", renderTertiaryCategoryOptions);
   renderSubcategoryOptions();
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -1487,9 +1565,8 @@ function createShoppingProductForm() {
       name,
       categoryId: form.elements.categoryId.value,
       subcategoryId: form.elements.subcategoryId.value || null,
+      tertiaryCategoryId: form.elements.tertiaryCategoryId.value || null,
       unit: form.elements.unit.value.trim(),
-      standardCode: normalizeShoppingStandardCode(form.elements.standardCode.value),
-      note: form.elements.note.value.trim(),
     });
   });
   return form;
@@ -1522,6 +1599,7 @@ function createShoppingSearchRow(product) {
   row.addEventListener("click", () => {
     state.shoppingCategoryId = product.categoryId;
     state.shoppingSubcategoryId = product.subcategoryId || "all";
+    state.shoppingTertiaryCategoryId = product.tertiaryCategoryId || "all";
     state.shoppingExpandedProductId = product.id;
     state.shoppingHighlightedProductId = product.id;
     state.shoppingAddingRecordProductId = null;
@@ -1536,6 +1614,7 @@ function createShoppingProductCard(product) {
   const expanded = state.shoppingExpandedProductId === product.id;
   const highlighted = state.shoppingHighlightedProductId === product.id;
   const renaming = state.shoppingRenamingProductId === product.id;
+  const editingUnit = state.shoppingEditingUnitProductId === product.id;
   const card = document.createElement("article");
   card.className = `shopping-product-card${expanded ? " is-expanded" : ""}${highlighted ? " is-highlighted" : ""}`;
   card.innerHTML = `
@@ -1543,7 +1622,7 @@ function createShoppingProductCard(product) {
       <div class="task-body">
         ${renaming ? shoppingProductRenameFormHtml(product) : `<h3>${escapeHtml(product.name)}</h3>`}
         <div class="task-meta">${escapeHtml(shoppingBestPriceText(product))}</div>
-        ${shoppingProductMetaHtml(product)}
+        ${editingUnit ? shoppingUnitInlineFormHtml(product) : shoppingProductMetaHtml(product)}
       </div>
       <div class="task-actions">
         ${renaming ? "" : state.shoppingSort === "custom" && !state.shoppingSearch ? dragHandleHtml() : ""}
@@ -1557,14 +1636,17 @@ function createShoppingProductCard(product) {
     state.shoppingExpandedProductId = expanded ? null : product.id;
     state.shoppingHighlightedProductId = null;
     if (expanded) {
+      state.shoppingEditingUnitProductId = null;
       state.shoppingAddingRecordProductId = null;
       state.shoppingEditingRecordId = null;
     }
     render();
   });
   card.querySelector('[data-action="rename"]')?.addEventListener("click", () => renameShoppingProduct(product.id));
+  card.querySelector('[data-action="edit-unit"]')?.addEventListener("click", () => editShoppingUnit(product.id));
   card.querySelector('[data-action="delete"]')?.addEventListener("click", () => deleteShoppingProduct(product.id));
   bindShoppingProductRenameForm(card, product.id);
+  bindShoppingUnitForm(card, product.id);
   setupShoppingProductSortable(card, product.id);
 
   if (expanded) {
@@ -1598,50 +1680,63 @@ function bindShoppingProductRenameForm(container, productId) {
 }
 
 function shoppingProductMetaHtml(product) {
-  const parts = [];
-  if (product.unit) parts.push(`单位：${product.unit}`);
-  const standardText = shoppingProductStandardText(product);
-  if (standardText) parts.push(standardText);
-  if (product.note) parts.push(`备注：${product.note}`);
-  return parts.length ? `<div class="task-meta">${escapeHtml(parts.join(" · "))}</div>` : "";
+  const unitText = product.unit || "未设置";
+  return `
+    <div class="shopping-product-unit-meta">
+      <span>商品单位：${escapeHtml(unitText)}</span>
+      <button class="icon-button small shopping-unit-edit-button" type="button" data-action="edit-unit" title="修改商品单位" aria-label="修改商品单位">✎</button>
+    </div>
+  `;
+}
+
+function shoppingUnitInlineFormHtml(product) {
+  return `
+    <form class="shopping-unit-inline-form">
+      <label class="shopping-unit-inline-field">
+        <span>商品单位</span>
+        <input name="unit" type="text" maxlength="16" value="${escapeHtml(product.unit)}" placeholder="商品单位" aria-label="商品单位" />
+      </label>
+      <div class="shopping-unit-inline-actions">
+        <button class="save-button" type="submit">保存</button>
+        <button class="cancel-button" type="button" data-action="cancel-unit-edit">取消</button>
+      </div>
+    </form>
+  `;
+}
+
+function bindShoppingUnitForm(container, productId) {
+  const form = container.querySelector(".shopping-unit-inline-form");
+  if (!form) return;
+  requestAnimationFrame(() => form.elements.unit?.focus());
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    state.shoppingEditingUnitProductId = null;
+    updateShoppingProduct(productId, {
+      unit: form.elements.unit.value.trim(),
+    });
+  });
+  form.querySelector('[data-action="cancel-unit-edit"]').addEventListener("click", () => {
+    state.shoppingEditingUnitProductId = null;
+    renderList();
+  });
+}
+
+function editShoppingUnit(id) {
+  const product = shoppingProductById(id);
+  if (!product) return;
+  state.shoppingEditingUnitProductId = id;
+  state.shoppingExpandedProductId = id;
+  state.shoppingRenamingProductId = null;
+  state.shoppingAddingRecordProductId = null;
+  state.shoppingEditingRecordId = null;
+  renderList();
 }
 
 function createShoppingProductDetail(product) {
   const detail = document.createElement("div");
   detail.className = "shopping-product-detail";
-  const infoPanel = document.createElement("section");
-  infoPanel.className = "shopping-product-info-panel";
-  infoPanel.innerHTML = `<div class="shopping-detail-heading">商品信息</div>`;
-  infoPanel.append(createShoppingUnitForm(product));
-  detail.append(infoPanel);
   detail.append(createShoppingRecordSection(product));
   return detail;
-}
-
-function createShoppingUnitForm(product) {
-  const form = document.createElement("form");
-  form.className = "shopping-unit-form";
-  form.innerHTML = `
-    <label class="date-field">
-      <span>数量单位</span>
-      <input name="unit" type="text" maxlength="16" value="${escapeHtml(product.unit)}" />
-    </label>
-    <label class="date-field shopping-standard-field">
-      <span>GB/T</span>
-      <input name="standardCode" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="24" value="${escapeHtml(normalizeShoppingStandardCode(product.standardCode))}" />
-    </label>
-    <input name="note" type="text" maxlength="120" value="${escapeHtml(product.note || "")}" placeholder="商品备注" />
-    <button class="save-button" type="submit">保存信息</button>
-  `;
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    updateShoppingProduct(product.id, {
-      unit: form.elements.unit.value.trim(),
-      standardCode: normalizeShoppingStandardCode(form.elements.standardCode.value),
-      note: form.elements.note.value.trim(),
-    });
-  });
-  return form;
 }
 
 function createShoppingRecordSection(product) {
@@ -1674,32 +1769,70 @@ function createShoppingRecordEditor(product, record = null) {
   const name = record ? shoppingRecordName(product, record) : "";
   const platform = record?.platform || shoppingPlatforms[0];
   const totalPrice = record ? formatMoney(record.totalPrice) : "";
-  const quantity = record ? formatQuantity(record.quantity) : "";
-  const standardCode = record ? normalizeShoppingStandardCode(record.standardCode) : normalizeShoppingStandardCode(product.standardCode);
+  const packaging = normalizeShoppingPackaging(record?.packaging) || {
+    packageUnit: "",
+    innerQuantity: null,
+    innerQuantityUnit: "",
+    contentAmount: null,
+    contentUnit: "",
+  };
+  const purchaseCount = record ? formatShoppingNumber(record.purchaseCount) : "";
+  const purchaseLink = record?.purchaseLink || "";
   const note = record?.note || "";
   form.className = "shopping-record-form shopping-record-editor";
   form.innerHTML = `
-    <input name="date" type="date" value="${escapeHtml(date)}" required />
-    <input name="name" type="text" maxlength="80" placeholder="本次名称" value="${escapeHtml(name)}" required />
-    <label class="select-field">
-      <span>平台</span>
-      <select name="platform" aria-label="平台" required>
-        ${shoppingPlatformOptions(platform)}
-      </select>
+    <div class="shopping-record-editor-basic">
+      <input name="date" type="date" value="${escapeHtml(date)}" required />
+      <input name="name" type="text" maxlength="80" placeholder="商品标题" value="${escapeHtml(name)}" required />
+    </div>
+    <div class="shopping-record-editor-commerce">
+      <label class="select-field">
+        <span>平台</span>
+        <select name="platform" aria-label="平台" required>
+          ${shoppingPlatformOptions(platform)}
+        </select>
+      </label>
+      <label class="date-field">
+        <span>总价</span>
+        <input name="totalPrice" type="number" min="0" step="0.01" value="${escapeHtml(totalPrice)}" />
+      </label>
+      <label class="date-field">
+        <span>购买包装数</span>
+        <input name="purchaseCount" type="number" min="0" step="0.01" value="${escapeHtml(purchaseCount)}" />
+      </label>
+      <label class="date-field">
+        <span>包装单位</span>
+        <input name="packageUnit" type="text" maxlength="16" value="${escapeHtml(packaging.packageUnit)}" />
+      </label>
+    </div>
+    <div class="shopping-packaging-fields">
+      <label class="date-field">
+        <span>包装内数量</span>
+        <input name="innerQuantity" type="number" min="0" step="any" value="${escapeHtml(formatShoppingNumber(packaging.innerQuantity))}" />
+      </label>
+      <label class="date-field">
+        <span>数量单位</span>
+        <input name="innerQuantityUnit" type="text" maxlength="16" value="${escapeHtml(packaging.innerQuantityUnit)}" />
+      </label>
+      <label class="date-field">
+        <span>包装内含量</span>
+        <input name="contentAmount" type="number" min="0" step="any" value="${escapeHtml(formatShoppingNumber(packaging.contentAmount))}" />
+      </label>
+      <label class="date-field">
+        <span>含量单位</span>
+        <input name="contentUnit" type="text" maxlength="16" value="${escapeHtml(packaging.contentUnit)}" />
+      </label>
+    </div>
+    <label class="shopping-link-field shopping-record-editor-link">
+      <div class="shopping-link-input-row">
+        <input name="purchaseLink" type="text" maxlength="500" value="${escapeHtml(purchaseLink)}" placeholder="购买链接" />
+        <button class="cancel-button shopping-copy-button" type="button" data-action="copy-link">复制</button>
+      </div>
     </label>
-    <label class="date-field">
-      <span>总价</span>
-      <input name="totalPrice" type="number" min="0" step="0.01" value="${escapeHtml(totalPrice)}" required />
+    <label class="shopping-note-field">
+      <span>备注</span>
+      <textarea name="note" rows="2" maxlength="240" placeholder="备注">${escapeHtml(note)}</textarea>
     </label>
-    <label class="date-field">
-      <span>数量</span>
-      <input name="quantity" type="number" min="0" step="0.01" value="${escapeHtml(quantity)}" required />
-    </label>
-    <label class="date-field shopping-standard-field">
-      <span>GB/T</span>
-      <input name="standardCode" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="24" value="${escapeHtml(standardCode)}" placeholder="国标号" />
-    </label>
-    <input name="note" type="text" maxlength="80" placeholder="备注" value="${escapeHtml(note)}" />
     <div class="shopping-record-editor-actions">
       <button class="primary-button" type="submit">${editing ? "保存记录" : "添加记录"}</button>
       <button class="cancel-button" type="button" data-action="cancel-record-edit">取消</button>
@@ -1709,18 +1842,26 @@ function createShoppingRecordEditor(product, record = null) {
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const totalPrice = normalizeMoneyInput(form.elements.totalPrice.value);
-    const quantity = normalizeMoneyInput(form.elements.quantity.value);
+    const purchaseCount = normalizeShoppingNumber(form.elements.purchaseCount.value);
+    const packaging = normalizeShoppingPackaging({
+      packageUnit: form.elements.packageUnit.value,
+      innerQuantity: form.elements.innerQuantity.value,
+      innerQuantityUnit: form.elements.innerQuantityUnit.value,
+      contentAmount: form.elements.contentAmount.value,
+      contentUnit: form.elements.contentUnit.value,
+    });
     const platform = form.elements.platform.value.trim();
     const name = form.elements.name.value.trim();
     const date = form.elements.date.value || state.selectedDate;
-    if (!isISODate(date) || !name || !shoppingPlatforms.includes(platform) || totalPrice === null || quantity === null || quantity <= 0) return;
+    if (!isISODate(date) || !name || !shoppingPlatforms.includes(platform)) return;
     const updates = {
       date,
       name,
       platform,
       totalPrice,
-      quantity,
-      standardCode: normalizeShoppingStandardCode(form.elements.standardCode.value),
+      purchaseCount,
+      packaging,
+      purchaseLink: form.elements.purchaseLink.value.trim(),
       note: form.elements.note.value.trim(),
     };
     if (editing) {
@@ -1733,6 +1874,9 @@ function createShoppingRecordEditor(product, record = null) {
     state.shoppingAddingRecordProductId = null;
     state.shoppingEditingRecordId = null;
     renderList();
+  });
+  form.querySelector('[data-action="copy-link"]').addEventListener("click", () => {
+    copyShoppingRecordLink(form.elements.purchaseLink.value);
   });
   return form;
 }
@@ -1757,16 +1901,19 @@ function createShoppingRecordRow(product, record) {
   }
   const row = document.createElement("div");
   row.className = "shopping-record-row";
-  const unitPrice = shoppingUnitPrice(record);
-  const unit = product.unit ? ` ${escapeHtml(product.unit)}` : "";
+  const priceText = shoppingRecordPriceText(product, record);
   const recordName = shoppingRecordName(product, record);
-  const standardText = shoppingRecordStandardText(record);
+  const purchaseLink = record.purchaseLink?.trim() || "";
+  const totalText = record.totalPrice === null ? "" : `${formatMoney(record.totalPrice)} 元`;
+  const purchaseCountText = record.purchaseCount === null ? "" : formatShoppingNumber(record.purchaseCount);
+  const packagingText = shoppingPackagingText(record.packaging);
   row.innerHTML = `
     <div>
       <strong>${escapeHtml(formatTaskDate(record.date))} · ${escapeHtml(recordName)} · ${escapeHtml(record.platform)}</strong>
-      <span>总价 ${formatMoney(record.totalPrice)} 元 · 数量 ${formatQuantity(record.quantity)}${unit} · 单价 ${formatUnitPrice(unitPrice)} 元${product.unit ? `/${escapeHtml(product.unit)}` : ""}</span>
-      ${standardText ? `<span>${escapeHtml(standardText)}</span>` : ""}
-      ${record.note ? `<span>${escapeHtml(record.note)}</span>` : ""}
+      <span class="shopping-record-price">总价 ${totalText} · 购买包装数 ${purchaseCountText} · 单价 ${escapeHtml(priceText)}</span>
+      ${packagingText ? `<span class="shopping-record-packaging">包装：${escapeHtml(packagingText)}</span>` : ""}
+      ${purchaseLink ? `<span class="shopping-record-link"><span>购买链接：${escapeHtml(purchaseLink)}</span><button class="cancel-button shopping-copy-button" type="button" data-action="copy-link">复制</button></span>` : ""}
+      ${record.note ? `<span class="shopping-record-note">备注：${escapeHtml(record.note)}</span>` : ""}
     </div>
     <div class="task-actions">
       <button class="icon-button small" type="button" data-action="edit" title="修改记录" aria-label="修改记录">✎</button>
@@ -1775,6 +1922,7 @@ function createShoppingRecordRow(product, record) {
   `;
   row.querySelector('[data-action="edit"]').addEventListener("click", () => editShoppingRecord(product.id, record.id));
   row.querySelector('[data-action="delete"]').addEventListener("click", () => deleteShoppingRecord(product.id, record.id));
+  row.querySelector('[data-action="copy-link"]')?.addEventListener("click", () => copyShoppingRecordLink(purchaseLink));
   return row;
 }
 
@@ -1873,17 +2021,41 @@ function createShoppingExportTree() {
       children.append(createShoppingExportChildCheckbox({
         label: "未归入二级分类",
         count: uncategorizedCount,
-        attr: "data-export-uncategorized",
+        attr: "data-export-uncategorized-category",
         id: category.id,
       }));
     }
     shoppingSubcategoriesFor(category.id).forEach((subcategory) => {
-      children.append(createShoppingExportChildCheckbox({
+      const subcategoryProducts = categoryProducts.filter((product) => product.subcategoryId === subcategory.id);
+      const subcategoryBlock = document.createElement("div");
+      subcategoryBlock.className = "shopping-export-subcategory";
+      subcategoryBlock.append(createShoppingExportChildCheckbox({
         label: subcategory.name,
-        count: shoppingSubcategoryProductCount(subcategory.id),
+        count: subcategoryProducts.length,
         attr: "data-export-subcategory",
         id: subcategory.id,
       }));
+      const tertiaryChildren = document.createElement("div");
+      tertiaryChildren.className = "shopping-export-tertiary-list";
+      const uncategorizedTertiaryCount = subcategoryProducts.filter((product) => !product.tertiaryCategoryId).length;
+      if (uncategorizedTertiaryCount) {
+        tertiaryChildren.append(createShoppingExportChildCheckbox({
+          label: "未归入三级分类",
+          count: uncategorizedTertiaryCount,
+          attr: "data-export-uncategorized-subcategory",
+          id: subcategory.id,
+        }));
+      }
+      shoppingTertiaryCategoriesFor(subcategory.id).forEach((tertiaryCategory) => {
+        tertiaryChildren.append(createShoppingExportChildCheckbox({
+          label: tertiaryCategory.name,
+          count: shoppingTertiaryCategoryProductCount(tertiaryCategory.id),
+          attr: "data-export-tertiary",
+          id: tertiaryCategory.id,
+        }));
+      });
+      subcategoryBlock.append(tertiaryChildren);
+      children.append(subcategoryBlock);
     });
     block.append(children);
     wrap.append(block);
@@ -1910,12 +2082,31 @@ function setupShoppingExportTreeInteractions(tree, onChange) {
       categoryInput.indeterminate = false;
       childInputs.forEach((input) => {
         input.checked = categoryInput.checked;
+        input.indeterminate = false;
       });
       onChange();
     });
   });
-  tree.querySelectorAll("[data-export-subcategory], [data-export-uncategorized]").forEach((childInput) => {
+  tree.querySelectorAll("[data-export-subcategory]").forEach((subcategoryInput) => {
+    subcategoryInput.addEventListener("change", () => {
+      const subcategoryBlock = subcategoryInput.closest(".shopping-export-subcategory");
+      const childInputs = shoppingExportSubcategoryChildInputs(subcategoryBlock);
+      subcategoryInput.indeterminate = false;
+      childInputs.forEach((input) => {
+        input.checked = subcategoryInput.checked;
+        input.indeterminate = false;
+      });
+      syncShoppingExportSubcategoryState(subcategoryBlock);
+      syncShoppingExportParentState(subcategoryInput.closest(".shopping-export-category"));
+      onChange();
+    });
+  });
+  tree.querySelectorAll("[data-export-tertiary], [data-export-uncategorized-category], [data-export-uncategorized-subcategory]").forEach((childInput) => {
     childInput.addEventListener("change", () => {
+      if (childInput.matches("[data-export-uncategorized-subcategory], [data-export-tertiary]")) {
+        const subcategoryBlock = childInput.closest(".shopping-export-subcategory");
+        syncShoppingExportSubcategoryState(subcategoryBlock);
+      }
       syncShoppingExportParentState(childInput.closest(".shopping-export-category"));
       onChange();
     });
@@ -1924,7 +2115,12 @@ function setupShoppingExportTreeInteractions(tree, onChange) {
 
 function shoppingExportChildInputs(block) {
   if (!block) return [];
-  return [...block.querySelectorAll("[data-export-subcategory], [data-export-uncategorized]")];
+  return [...block.querySelectorAll("[data-export-subcategory], [data-export-tertiary], [data-export-uncategorized-category], [data-export-uncategorized-subcategory]")];
+}
+
+function shoppingExportSubcategoryChildInputs(block) {
+  if (!block) return [];
+  return [...block.querySelectorAll("[data-export-tertiary], [data-export-uncategorized-subcategory]")];
 }
 
 function syncShoppingExportParentState(block) {
@@ -1936,11 +2132,22 @@ function syncShoppingExportParentState(block) {
   parent.indeterminate = checkedCount > 0 && checkedCount < childInputs.length;
 }
 
+function syncShoppingExportSubcategoryState(block) {
+  const parent = block?.querySelector("[data-export-subcategory]");
+  if (!parent) return;
+  const childInputs = shoppingExportSubcategoryChildInputs(block);
+  const checkedCount = childInputs.filter((input) => input.checked).length;
+  parent.checked = childInputs.length > 0 && checkedCount === childInputs.length;
+  parent.indeterminate = checkedCount > 0 && checkedCount < childInputs.length;
+}
+
 function collectShoppingExportSelection(container) {
   return {
     categories: new Set([...container.querySelectorAll("[data-export-category]:checked")].map((input) => input.dataset.exportCategory)),
     subcategories: new Set([...container.querySelectorAll("[data-export-subcategory]:checked")].map((input) => input.dataset.exportSubcategory)),
-    uncategorizedCategories: new Set([...container.querySelectorAll("[data-export-uncategorized]:checked")].map((input) => input.dataset.exportUncategorized)),
+    tertiaryCategories: new Set([...container.querySelectorAll("[data-export-tertiary]:checked")].map((input) => input.dataset.exportTertiary)),
+    uncategorizedCategories: new Set([...container.querySelectorAll("[data-export-uncategorized-category]:checked")].map((input) => input.dataset.exportUncategorizedCategory)),
+    uncategorizedSubcategories: new Set([...container.querySelectorAll("[data-export-uncategorized-subcategory]:checked")].map((input) => input.dataset.exportUncategorizedSubcategory)),
   };
 }
 
@@ -1950,7 +2157,9 @@ function shoppingProductsForExport(scope, selection) {
   const products = state.shopping.products.filter((product) => {
     if (selection.categories.has(product.categoryId)) return true;
     if (product.subcategoryId && selection.subcategories.has(product.subcategoryId)) return true;
+    if (product.tertiaryCategoryId && selection.tertiaryCategories.has(product.tertiaryCategoryId)) return true;
     if (!product.subcategoryId && selection.uncategorizedCategories.has(product.categoryId)) return true;
+    if (product.subcategoryId && !product.tertiaryCategoryId && selection.uncategorizedSubcategories.has(product.subcategoryId)) return true;
     return false;
   });
   return sortShoppingProducts(products);
@@ -1964,7 +2173,9 @@ function shoppingExportScopeLabel(scope, container) {
     const category = shoppingCategoryById(state.shoppingCategoryId)?.name || "未知一级分类";
     if (state.shoppingSubcategoryId === "all") return `当前视图：${category}`;
     const subcategory = shoppingSubcategoryById(state.shoppingSubcategoryId)?.name || "未知二级分类";
-    return `当前视图：${category} > ${subcategory}`;
+    if (state.shoppingTertiaryCategoryId === "all") return `当前视图：${category} > ${subcategory}`;
+    const tertiaryCategory = shoppingTertiaryCategoryById(state.shoppingTertiaryCategoryId)?.name || "未知三级分类";
+    return `当前视图：${category} > ${subcategory} > ${tertiaryCategory}`;
   }
   const selection = collectShoppingExportSelection(container);
   const parts = [
@@ -1976,10 +2187,25 @@ function shoppingExportScopeLabel(scope, container) {
       const category = shoppingCategoryById(subcategory.categoryId)?.name || "未知一级分类";
       return `${category} > ${subcategory.name}`;
     }).filter(Boolean),
+    ...[...selection.tertiaryCategories].map((id) => {
+      const tertiaryCategory = shoppingTertiaryCategoryById(id);
+      if (!tertiaryCategory) return "";
+      const subcategory = shoppingSubcategoryById(tertiaryCategory.subcategoryId);
+      if (!subcategory || selection.subcategories.has(subcategory.id)) return "";
+      if (selection.categories.has(subcategory.categoryId)) return "";
+      const category = shoppingCategoryById(subcategory.categoryId)?.name || "未知一级分类";
+      return `${category} > ${subcategory.name} > ${tertiaryCategory.name}`;
+    }).filter(Boolean),
     ...[...selection.uncategorizedCategories].map((id) => {
       if (selection.categories.has(id)) return "";
       const category = shoppingCategoryById(id)?.name;
       return category ? `${category} > 未归入二级分类` : "";
+    }).filter(Boolean),
+    ...[...selection.uncategorizedSubcategories].map((id) => {
+      const subcategory = shoppingSubcategoryById(id);
+      if (!subcategory || selection.subcategories.has(id) || selection.categories.has(subcategory.categoryId)) return "";
+      const category = shoppingCategoryById(subcategory.categoryId)?.name || "未知一级分类";
+      return `${category} > ${subcategory.name} > 未归入三级分类`;
     }).filter(Boolean),
   ];
   return parts.length ? `自定义范围：${parts.join("；")}` : "自定义范围";
@@ -6378,7 +6604,9 @@ function setupShoppingTabSortable(element, handle, key) {
     handle,
     canDrop: (sourceKey, targetKey) => {
       if (!sameSortableLayer(sourceKey, targetKey)) return false;
-      return sourceKey.kind !== "shopping-subcategory" || sourceKey.categoryId === targetKey.categoryId;
+      if (sourceKey.kind === "shopping-subcategory") return sourceKey.categoryId === targetKey.categoryId;
+      if (sourceKey.kind === "shopping-tertiary") return sourceKey.subcategoryId === targetKey.subcategoryId;
+      return true;
     },
     onDrop: reorderShoppingTabs,
   });
@@ -6578,6 +6806,16 @@ function reorderShoppingTabs(sourceKey, targetKey, after) {
       subcategory.updatedAt = new Date().toISOString();
     });
     state.shopping.subcategories = state.shopping.subcategories.map((subcategory) => reordered.find((entry) => entry.id === subcategory.id) || subcategory);
+  }
+
+  if (sourceKey.kind === "shopping-tertiary") {
+    const tertiaryCategories = shoppingTertiaryCategoriesFor(sourceKey.subcategoryId);
+    const reordered = reorderByIds(tertiaryCategories, sourceKey.id, targetKey.id, after);
+    reordered.forEach((tertiaryCategory, index) => {
+      tertiaryCategory.order = index + 1;
+      tertiaryCategory.updatedAt = new Date().toISOString();
+    });
+    state.shopping.tertiaryCategories = state.shopping.tertiaryCategories.map((tertiaryCategory) => reordered.find((entry) => entry.id === tertiaryCategory.id) || tertiaryCategory);
   }
 
   saveShopping();
@@ -6828,6 +7066,7 @@ function addShoppingCategory(name) {
   });
   state.shoppingCategoryId = id;
   state.shoppingSubcategoryId = "all";
+  state.shoppingTertiaryCategoryId = "all";
   saveShopping();
   render();
 }
@@ -6857,6 +7096,7 @@ function deleteShoppingCategory(id) {
   if (state.shoppingCategoryId === id) {
     state.shoppingCategoryId = "all";
     state.shoppingSubcategoryId = "all";
+    state.shoppingTertiaryCategoryId = "all";
   }
   saveShopping();
   render();
@@ -6873,6 +7113,7 @@ function addShoppingSubcategory(categoryId, name) {
     updatedAt: null,
   });
   state.shoppingSubcategoryId = id;
+  state.shoppingTertiaryCategoryId = "all";
   saveShopping();
   render();
 }
@@ -6890,16 +7131,61 @@ function renameShoppingSubcategory(id) {
 }
 
 function deleteShoppingSubcategory(id) {
-  if (state.shopping.products.some((item) => item.subcategoryId === id)) {
+  if (state.shopping.tertiaryCategories.some((item) => item.subcategoryId === id) || state.shopping.products.some((item) => item.subcategoryId === id)) {
     showWorkbuddyToast({
       title: "不能删除分类",
-      message: "这个二级分类下面还有商品，请先删除商品。",
+      message: "这个二级分类下面还有三级分类或商品，请先删除里面的内容。",
       tone: "warning",
     });
     return;
   }
   state.shopping.subcategories = state.shopping.subcategories.filter((item) => item.id !== id);
-  if (state.shoppingSubcategoryId === id) state.shoppingSubcategoryId = "all";
+  if (state.shoppingSubcategoryId === id) {
+    state.shoppingSubcategoryId = "all";
+    state.shoppingTertiaryCategoryId = "all";
+  }
+  saveShopping();
+  render();
+}
+
+function addShoppingTertiaryCategory(subcategoryId, name) {
+  const id = createId();
+  state.shopping.tertiaryCategories.push({
+    id,
+    subcategoryId,
+    name,
+    order: nextShoppingTertiaryCategoryOrder(subcategoryId),
+    createdAt: new Date().toISOString(),
+    updatedAt: null,
+  });
+  state.shoppingTertiaryCategoryId = id;
+  saveShopping();
+  render();
+}
+
+function renameShoppingTertiaryCategory(id) {
+  const tertiaryCategory = shoppingTertiaryCategoryById(id);
+  if (!tertiaryCategory) return;
+  const name = prompt("三级分类名称：", tertiaryCategory.name);
+  if (name === null || !name.trim()) return;
+  state.shopping.tertiaryCategories = state.shopping.tertiaryCategories.map((item) =>
+    item.id === id ? { ...item, name: name.trim(), updatedAt: new Date().toISOString() } : item,
+  );
+  saveShopping();
+  render();
+}
+
+function deleteShoppingTertiaryCategory(id) {
+  if (state.shopping.products.some((item) => item.tertiaryCategoryId === id)) {
+    showWorkbuddyToast({
+      title: "不能删除分类",
+      message: "这个三级分类下面还有商品，请先删除商品。",
+      tone: "warning",
+    });
+    return;
+  }
+  state.shopping.tertiaryCategories = state.shopping.tertiaryCategories.filter((item) => item.id !== id);
+  if (state.shoppingTertiaryCategoryId === id) state.shoppingTertiaryCategoryId = "all";
   saveShopping();
   render();
 }
@@ -6911,9 +7197,8 @@ function addShoppingProduct(data) {
     name: data.name,
     categoryId: data.categoryId,
     subcategoryId: data.subcategoryId || null,
+    tertiaryCategoryId: data.tertiaryCategoryId || null,
     unit: data.unit || "",
-    standardCode: normalizeShoppingStandardCode(data.standardCode),
-    note: data.note || "",
     order: nextShoppingProductOrder(),
     records: [],
     createdAt: new Date().toISOString(),
@@ -6921,6 +7206,7 @@ function addShoppingProduct(data) {
   });
   state.shoppingCategoryId = data.categoryId;
   state.shoppingSubcategoryId = data.subcategoryId || "all";
+  state.shoppingTertiaryCategoryId = data.tertiaryCategoryId || "all";
   state.shoppingExpandedProductId = id;
   state.shoppingAddingRecordProductId = null;
   state.shoppingEditingRecordId = null;
@@ -6946,6 +7232,7 @@ function renameShoppingProduct(id) {
   const product = shoppingProductById(id);
   if (!product) return;
   state.shoppingRenamingProductId = id;
+  state.shoppingEditingUnitProductId = null;
   state.shoppingExpandedProductId = id;
   state.shoppingAddingRecordProductId = null;
   state.shoppingEditingRecordId = null;
@@ -6986,9 +7273,10 @@ function addShoppingRecord(productId, record) {
           date: record.date,
           name: record.name,
           platform: record.platform,
-          totalPrice: roundMoney(record.totalPrice),
-          quantity: roundMoney(record.quantity),
-          standardCode: normalizeShoppingStandardCode(record.standardCode),
+          totalPrice: record.totalPrice ?? null,
+          purchaseCount: record.purchaseCount ?? null,
+          packaging: record.packaging || null,
+          purchaseLink: record.purchaseLink || "",
           note: record.note || "",
           createdAt: new Date().toISOString(),
           updatedAt: null,
@@ -7025,9 +7313,10 @@ function updateShoppingRecord(productId, recordId, updates) {
               date: updates.date,
               name: updates.name,
               platform: updates.platform,
-              totalPrice: roundMoney(updates.totalPrice),
-              quantity: roundMoney(updates.quantity),
-              standardCode: normalizeShoppingStandardCode(updates.standardCode),
+              totalPrice: updates.totalPrice ?? null,
+              purchaseCount: updates.purchaseCount ?? null,
+              packaging: updates.packaging || null,
+              purchaseLink: updates.purchaseLink || "",
               note: updates.note || "",
               updatedAt: new Date().toISOString(),
             }
@@ -7297,9 +7586,19 @@ function shoppingSubcategoryProductCount(subcategoryId) {
   return state.shopping.products.filter((product) => product.subcategoryId === subcategoryId).length;
 }
 
+function shoppingTertiaryCategoryProductCount(tertiaryCategoryId) {
+  return state.shopping.products.filter((product) => product.tertiaryCategoryId === tertiaryCategoryId).length;
+}
+
 function shoppingSubcategoriesFor(categoryId) {
   return state.shopping.subcategories
     .filter((subcategory) => subcategory.categoryId === categoryId)
+    .sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name, "zh-CN"));
+}
+
+function shoppingTertiaryCategoriesFor(subcategoryId) {
+  return state.shopping.tertiaryCategories
+    .filter((tertiaryCategory) => tertiaryCategory.subcategoryId === subcategoryId)
     .sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name, "zh-CN"));
 }
 
@@ -7315,6 +7614,9 @@ function shoppingVisibleProducts() {
     if (state.shoppingSubcategoryId !== "all") {
       products = products.filter((product) => product.subcategoryId === state.shoppingSubcategoryId);
     }
+    if (state.shoppingTertiaryCategoryId !== "all") {
+      products = products.filter((product) => product.tertiaryCategoryId === state.shoppingTertiaryCategoryId);
+    }
   }
   return sortShoppingProducts(products);
 }
@@ -7327,55 +7629,202 @@ function sortShoppingProducts(products) {
 
 function shoppingProductMatches(product, keyword) {
   const recordText = product.records
-    .map((record) => `${record.name || ""} ${record.platform} ${record.standardCode || ""} ${shoppingRecordStandardText(record)} ${record.note || ""}`)
+    .map((record) => `${record.name || ""} ${record.platform} ${record.purchaseLink || ""} ${record.note || ""} ${shoppingPackagingText(record.packaging)}`)
     .join(" ");
   const path = shoppingProductPath(product);
-  return `${product.name} ${product.note || ""} ${product.standardCode || ""} ${shoppingProductStandardText(product)} ${path} ${recordText}`.toLowerCase().includes(keyword);
+  return `${product.name} ${path} ${recordText}`.toLowerCase().includes(keyword);
 }
 
 function shoppingProductPath(product) {
   const category = shoppingCategoryById(product.categoryId)?.name || "未分类";
   const subcategory = product.subcategoryId ? shoppingSubcategoryById(product.subcategoryId)?.name : "";
-  return subcategory ? `${category} > ${subcategory}` : category;
+  const tertiaryCategory = product.tertiaryCategoryId ? shoppingTertiaryCategoryById(product.tertiaryCategoryId)?.name : "";
+  return [category, subcategory, tertiaryCategory].filter(Boolean).join(" > ");
 }
 
 function shoppingBestPriceText(product) {
   const best = shoppingBestRecord(product);
   if (!best) return "暂无价格记录";
-  const unit = product.unit ? `/${product.unit}` : "";
-  return `最低：${best.record.platform} ${formatUnitPrice(best.unitPrice)} 元${unit}`;
+  const unit = best.details.primaryUnit ? `/${best.details.primaryUnit}` : "";
+  return `最低：${best.record.platform} ${formatUnitPrice(best.details.primaryPrice)} 元${unit}`;
 }
 
 function shoppingBestRecord(product) {
   return product.records
-    .map((record) => ({ record, unitPrice: shoppingUnitPrice(record) }))
-    .filter((item) => Number.isFinite(item.unitPrice))
-    .sort((a, b) => a.unitPrice - b.unitPrice || a.record.date.localeCompare(b.record.date))[0] || null;
+    .map((record) => ({ record, details: shoppingRecordPriceDetails(product, record) }))
+    .filter((item) => Number.isFinite(item.details.primaryPrice))
+    .sort((a, b) => a.details.primaryPrice - b.details.primaryPrice || a.record.date.localeCompare(b.record.date))[0] || null;
 }
 
-function shoppingUnitPrice(record) {
-  const quantity = Number(record.quantity);
-  if (!Number.isFinite(quantity) || quantity <= 0) return null;
-  return Number(record.totalPrice) / quantity;
+function normalizeShoppingNumber(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    String(value).trim() === ""
+  ) {
+    return null;
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return null;
+  return Math.round(number * 1000000) / 1000000;
+}
+
+function formatShoppingNumber(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return "";
+  const rounded = normalizeShoppingNumber(value);
+  if (rounded === null) return "";
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function normalizeShoppingPackaging(packaging) {
+  if (!packaging || typeof packaging !== "object") return null;
+  const packageUnit = typeof packaging.packageUnit === "string" ? packaging.packageUnit.trim() : "";
+  const innerQuantity = normalizeShoppingNumber(packaging.innerQuantity);
+  const innerQuantityUnit = typeof packaging.innerQuantityUnit === "string" ? packaging.innerQuantityUnit.trim() : "";
+  const contentAmount = normalizeShoppingNumber(packaging.contentAmount);
+  const contentUnit = typeof packaging.contentUnit === "string" ? packaging.contentUnit.trim() : "";
+  if (!packageUnit && innerQuantity === null && !innerQuantityUnit && contentAmount === null && !contentUnit) return null;
+  return { packageUnit, innerQuantity, innerQuantityUnit, contentAmount, contentUnit };
+}
+
+function shoppingPackagingText(packaging) {
+  const normalized = normalizeShoppingPackaging(packaging);
+  if (!normalized) return "";
+  const packagePrefix = normalized.packageUnit ? `每${normalized.packageUnit}` : "包装内";
+  const count = normalized.innerQuantity === null ? "" : formatShoppingNumber(normalized.innerQuantity);
+  const countUnit = normalized.innerQuantityUnit;
+  const amount = normalized.contentAmount === null ? "" : formatShoppingNumber(normalized.contentAmount);
+  const amountUnit = normalized.contentUnit;
+  if (amount && amountUnit && count && countUnit) return `每${countUnit}${amount}${amountUnit}，${packagePrefix}${count}${countUnit}`;
+  if (amount && amountUnit) return `${packagePrefix}${amount}${amountUnit}`;
+  if (count && countUnit) return `${packagePrefix}${count}${countUnit}`;
+  if (normalized.packageUnit) return `包装单位：${normalized.packageUnit}`;
+  return "";
+}
+
+function normalizeShoppingUnitKey(unit) {
+  const value = String(unit || "").trim();
+  if (!value) return "";
+  const lower = value.toLowerCase();
+  return { 克: "g", 千克: "kg", 毫升: "ml", 升: "l", l: "l" }[lower] || lower;
+}
+
+function shoppingUnitConversionFactor(fromUnit, toUnit) {
+  const from = normalizeShoppingUnitKey(fromUnit);
+  const to = normalizeShoppingUnitKey(toUnit);
+  if (!from || !to) return null;
+  if (from === to) return 1;
+  const units = {
+    g: { dimension: "mass", factor: 1 },
+    kg: { dimension: "mass", factor: 1000 },
+    ml: { dimension: "volume", factor: 1 },
+    l: { dimension: "volume", factor: 1000 },
+  };
+  if (!units[from] || !units[to] || units[from].dimension !== units[to].dimension) return null;
+  return units[from].factor / units[to].factor;
+}
+
+function shoppingRecordPriceDetails(product, record) {
+  if (
+    record.totalPrice === null ||
+    record.totalPrice === undefined ||
+    String(record.totalPrice).trim() === ""
+  ) {
+    return { packagePrice: null, packageUnit: "", contentPrice: null, contentUnit: "", contentTargetPrice: null, contentTargetUnit: "", primaryPrice: null, primaryUnit: "" };
+  }
+  const totalPrice = Number(record.totalPrice);
+  if (!Number.isFinite(totalPrice) || totalPrice < 0) {
+    return { packagePrice: null, packageUnit: "", contentPrice: null, contentUnit: "", contentTargetPrice: null, contentTargetUnit: "", primaryPrice: null, primaryUnit: "" };
+  }
+  const packaging = normalizeShoppingPackaging(record.packaging);
+  const purchaseCount = normalizeShoppingNumber(record.purchaseCount);
+  const emptyDetails = { packagePrice: null, packageUnit: packaging?.packageUnit || "", contentPrice: null, contentUnit: "", contentTargetPrice: null, contentTargetUnit: "", primaryPrice: null, primaryUnit: "" };
+  if (!packaging || purchaseCount === null || purchaseCount <= 0) return emptyDetails;
+
+  const packagePrice = packaging.packageUnit ? totalPrice / purchaseCount : null;
+  let contentAmount = packaging.contentAmount;
+  let contentUnit = packaging.contentUnit;
+  if (contentAmount !== null && contentAmount > 0 && packaging.innerQuantity !== null && packaging.innerQuantity > 0) {
+    contentAmount *= packaging.innerQuantity;
+  } else if (contentAmount === null && packaging.innerQuantity !== null && packaging.innerQuantity > 0 && packaging.innerQuantityUnit) {
+    contentAmount = packaging.innerQuantity;
+    contentUnit = packaging.innerQuantityUnit;
+  }
+  const contentPrice = contentAmount !== null && contentAmount > 0 && contentUnit
+    ? totalPrice / (contentAmount * purchaseCount)
+    : null;
+  const targetUnit = product.unit || "";
+  const packageFactor = shoppingUnitConversionFactor(packaging.packageUnit, targetUnit);
+  const contentFactor = shoppingUnitConversionFactor(contentUnit, targetUnit);
+  const packageTargetPrice = packagePrice !== null && packageFactor !== null ? packagePrice / packageFactor : null;
+  const contentTargetPrice = contentPrice !== null && contentFactor !== null ? contentPrice / contentFactor : null;
+  const primaryPrice = Number.isFinite(contentTargetPrice)
+    ? contentTargetPrice
+    : Number.isFinite(packageTargetPrice)
+      ? packageTargetPrice
+      : null;
+  return {
+    packagePrice: Number.isFinite(packagePrice) ? packagePrice : null,
+    packageUnit: packaging.packageUnit,
+    contentPrice: Number.isFinite(contentPrice) ? contentPrice : null,
+    contentUnit,
+    contentTargetPrice: Number.isFinite(contentTargetPrice) ? contentTargetPrice : Number.isFinite(contentPrice) ? contentPrice : null,
+    contentTargetUnit: Number.isFinite(contentTargetPrice) ? targetUnit : contentUnit,
+    primaryPrice,
+    primaryUnit: Number.isFinite(contentTargetPrice) || Number.isFinite(packageTargetPrice) ? targetUnit : "",
+  };
+}
+
+function shoppingRecordPriceText(product, record) {
+  const details = shoppingRecordPriceDetails(product, record);
+  const prices = [];
+  if (Number.isFinite(details.packagePrice) && details.packageUnit) {
+    prices.push(`${formatUnitPrice(details.packagePrice)} 元/${details.packageUnit}`);
+  }
+  if (Number.isFinite(details.contentTargetPrice) && details.contentTargetUnit) {
+    prices.push(`${formatUnitPrice(details.contentTargetPrice)} 元/${details.contentTargetUnit}`);
+  }
+  return prices.join(" · ");
 }
 
 function shoppingRecordName(product, record) {
   return record.name || product.name;
 }
 
-function shoppingRecordStandardText(record) {
-  const code = normalizeShoppingStandardCode(record.standardCode);
-  return code ? `GB/T ${code}` : "";
-}
+async function copyShoppingRecordLink(value) {
+  const link = String(value || "").trim();
+  if (!link) {
+    showWorkbuddyToast({
+      title: "没有购买链接",
+      message: "请先填写购买链接。",
+      tone: "warning",
+    });
+    return;
+  }
 
-function shoppingProductStandardText(product) {
-  const code = normalizeShoppingStandardCode(product.standardCode);
-  return code ? `GB/T ${code}` : "";
-}
-
-function normalizeShoppingStandardCode(value) {
-  if (value === null || value === undefined) return "";
-  return String(value).replace(/^GB\/T\s*/i, "").trim();
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(link);
+    } else {
+      const textarea = document.createElement("textarea");
+      textarea.value = link;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.append(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      textarea.remove();
+      if (!copied) throw new Error("Clipboard copy failed");
+    }
+    showWorkbuddyToast({ title: "已复制购买链接", message: "购买链接已复制到剪贴板。" });
+  } catch {
+    showWorkbuddyToast({
+      title: "复制失败",
+      message: "浏览器没有允许复制，请手动选择并复制链接。",
+      tone: "warning",
+    });
+  }
 }
 
 function sortedShoppingRecords(product) {
@@ -7390,6 +7839,10 @@ function shoppingSubcategoryById(id) {
   return state.shopping.subcategories.find((subcategory) => subcategory.id === id) || null;
 }
 
+function shoppingTertiaryCategoryById(id) {
+  return state.shopping.tertiaryCategories.find((tertiaryCategory) => tertiaryCategory.id === id) || null;
+}
+
 function shoppingProductById(id) {
   return state.shopping.products.find((product) => product.id === id) || null;
 }
@@ -7402,37 +7855,48 @@ function nextShoppingSubcategoryOrder(categoryId) {
   return Math.max(0, ...shoppingSubcategoriesFor(categoryId).map((subcategory) => subcategory.order || 0)) + 1;
 }
 
+function nextShoppingTertiaryCategoryOrder(subcategoryId) {
+  return Math.max(0, ...shoppingTertiaryCategoriesFor(subcategoryId).map((tertiaryCategory) => tertiaryCategory.order || 0)) + 1;
+}
+
 function nextShoppingProductOrder() {
   return Math.max(0, ...state.shopping.products.map((product) => product.order || 0)) + 1;
 }
 
 function createShoppingWorkbookBlob(products, { exportedAt, scopeLabel }) {
   const detailRows = [
-    ["一级分类", "二级分类", "商品词条", "商品默认国标", "商品备注", "本次名称", "平台", "购买日期", "本次国标", "总价", "数量", "单位", "单价", "本次备注"],
+    ["一级分类", "二级分类", "三级分类", "商品词条", "本次名称", "平台", "购买日期", "购买链接", "总价", "购买包装数", "包装单位", "包装内数量", "数量单位", "包装内含量", "含量单位", "包装规格", "包装单价", "含量单价", "本次备注"],
   ];
   products.forEach((product) => {
     sortedShoppingRecords(product).forEach((record) => {
+      const details = shoppingRecordPriceDetails(product, record);
+      const packaging = normalizeShoppingPackaging(record.packaging);
       detailRows.push([
         shoppingCategoryById(product.categoryId)?.name || "未分类",
         product.subcategoryId ? shoppingSubcategoryById(product.subcategoryId)?.name || "" : "",
+        product.tertiaryCategoryId ? shoppingTertiaryCategoryById(product.tertiaryCategoryId)?.name || "" : "",
         product.name,
-        shoppingProductStandardText(product),
-        product.note || "",
         shoppingRecordName(product, record),
         record.platform,
         record.date,
-        shoppingRecordStandardText(record),
-        Number(record.totalPrice) || 0,
-        Number(record.quantity) || 0,
-        product.unit || "",
-        shoppingUnitPrice(record) ?? "",
+        record.purchaseLink || "",
+        record.totalPrice ?? "",
+        record.purchaseCount ?? "",
+        packaging?.packageUnit || "",
+        packaging?.innerQuantity ?? "",
+        packaging?.innerQuantityUnit || "",
+        packaging?.contentAmount ?? "",
+        packaging?.contentUnit || "",
+        shoppingPackagingText(record.packaging),
+        details.packagePrice ?? "",
+        details.contentPrice ?? "",
         record.note || "",
       ]);
     });
   });
 
   const summaryRows = [
-    ["一级分类", "二级分类", "商品词条", "单位", "默认国标", "商品备注", "记录数", "最低单价", "最低价平台", "最低价本次名称", "最低价日期", "最近购买日期"],
+    ["一级分类", "二级分类", "三级分类", "商品词条", "商品单位", "记录数", "最低单价", "最低价单位", "最低价平台", "最低价本次名称", "最低价日期", "最近购买日期"],
   ];
   products.forEach((product) => {
     const best = shoppingBestRecord(product);
@@ -7440,12 +7904,12 @@ function createShoppingWorkbookBlob(products, { exportedAt, scopeLabel }) {
     summaryRows.push([
       shoppingCategoryById(product.categoryId)?.name || "未分类",
       product.subcategoryId ? shoppingSubcategoryById(product.subcategoryId)?.name || "" : "",
+      product.tertiaryCategoryId ? shoppingTertiaryCategoryById(product.tertiaryCategoryId)?.name || "" : "",
       product.name,
       product.unit || "",
-      shoppingProductStandardText(product),
-      product.note || "",
       product.records.length,
-      best?.unitPrice ?? "",
+      best?.details.primaryPrice ?? "",
+      best?.details.primaryUnit || "",
       best?.record.platform || "",
       best ? shoppingRecordName(product, best.record) : "",
       best?.record.date || "",
@@ -7631,6 +8095,7 @@ function xmlAttribute(value) {
 }
 
 function normalizeMoneyInput(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
   const number = Number(value);
   if (!Number.isFinite(number) || number < 0) return null;
   return roundMoney(number);
@@ -7641,16 +8106,18 @@ function roundMoney(value) {
 }
 
 function formatMoney(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return "";
   return roundMoney(value).toFixed(2);
 }
 
 function formatQuantity(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return "";
   const rounded = roundMoney(value);
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2);
 }
 
 function formatUnitPrice(value) {
-  if (!Number.isFinite(value)) return "0.00";
+  if (!Number.isFinite(value)) return "";
   if (value > 0 && value < 0.01) return value.toFixed(4);
   return roundMoney(value).toFixed(2);
 }
@@ -8197,10 +8664,12 @@ function normalizeShopping(shopping = {}) {
   const categoryIds = new Set(categories.map((category) => category.id));
   const subcategories = normalizeShoppingSubcategories(shopping.subcategories, categoryIds, now);
   const subcategoryIds = new Set(subcategories.map((subcategory) => subcategory.id));
+  const tertiaryCategories = normalizeShoppingTertiaryCategories(shopping.tertiaryCategories, subcategoryIds, now);
   return {
     categories,
     subcategories,
-    products: normalizeShoppingProducts(shopping.products, categoryIds, subcategoryIds, now),
+    tertiaryCategories,
+    products: normalizeShoppingProducts(shopping.products, categoryIds, subcategoryIds, tertiaryCategories, now),
   };
 }
 
@@ -8231,7 +8700,21 @@ function normalizeShoppingSubcategories(subcategories, categoryIds, now) {
     }));
 }
 
-function normalizeShoppingProducts(products, categoryIds, subcategoryIds, now) {
+function normalizeShoppingTertiaryCategories(tertiaryCategories, subcategoryIds, now) {
+  if (!Array.isArray(tertiaryCategories)) return [];
+  return tertiaryCategories
+    .filter((tertiaryCategory) => tertiaryCategory?.id && tertiaryCategory?.name && subcategoryIds.has(String(tertiaryCategory.subcategoryId)))
+    .map((tertiaryCategory, index) => ({
+      id: String(tertiaryCategory.id),
+      subcategoryId: String(tertiaryCategory.subcategoryId),
+      name: String(tertiaryCategory.name),
+      order: normalizeNonNegativeInteger(tertiaryCategory.order) || index + 1,
+      createdAt: tertiaryCategory.createdAt || now,
+      updatedAt: tertiaryCategory.updatedAt || null,
+    }));
+}
+
+function normalizeShoppingProducts(products, categoryIds, subcategoryIds, tertiaryCategories, now) {
   if (!Array.isArray(products)) return [];
   return products
     .filter((product) => product?.id && product?.name && categoryIds.has(String(product.categoryId)))
@@ -8239,14 +8722,16 @@ function normalizeShoppingProducts(products, categoryIds, subcategoryIds, now) {
       const subcategoryId = product.subcategoryId && subcategoryIds.has(String(product.subcategoryId))
         ? String(product.subcategoryId)
         : null;
+      const tertiaryCategory = product.tertiaryCategoryId
+        ? tertiaryCategories.find((item) => item.id === String(product.tertiaryCategoryId) && item.subcategoryId === subcategoryId)
+        : null;
       return {
         id: String(product.id),
         name: String(product.name),
         categoryId: String(product.categoryId),
         subcategoryId,
+        tertiaryCategoryId: tertiaryCategory?.id || null,
         unit: typeof product.unit === "string" ? product.unit : "",
-        standardCode: normalizeShoppingStandardCode(product.standardCode),
-        note: typeof product.note === "string" ? product.note : "",
         order: normalizeNonNegativeInteger(product.order) || index + 1,
         records: normalizeShoppingRecords(product.records, now),
         createdAt: product.createdAt || now,
@@ -8261,15 +8746,15 @@ function normalizeShoppingRecords(records, now) {
     .filter((record) => record?.id && isISODate(record.date) && record.platform)
     .map((record) => {
       const totalPrice = normalizeMoneyInput(record.totalPrice);
-      const quantity = normalizeMoneyInput(record.quantity);
       return {
         id: String(record.id),
         date: record.date,
         name: typeof record.name === "string" ? record.name : "",
         platform: String(record.platform),
-        totalPrice: totalPrice ?? 0,
-        quantity: quantity && quantity > 0 ? quantity : 1,
-        standardCode: normalizeShoppingStandardCode(record.standardCode),
+        totalPrice,
+        purchaseCount: normalizeShoppingNumber(record.purchaseCount),
+        packaging: normalizeShoppingPackaging(record.packaging),
+        purchaseLink: typeof record.purchaseLink === "string" ? record.purchaseLink : "",
         note: typeof record.note === "string" ? record.note : "",
         createdAt: record.createdAt || now,
         updatedAt: record.updatedAt || null,
