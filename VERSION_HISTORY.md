@@ -6,7 +6,7 @@
 
 - 本地缓存版本：`index.html`、`app.js`、`styles.css`、`sw.js` 里使用的 `vXX`，主要用于让浏览器加载新文件，当前是 `v85`。
 - Git 版本：每次 `git commit` 生成的代码快照，用提交哈希识别，例如 `209d40a`。
-- GitHub 版本：已经推送到 GitHub `main` 分支上的 Git 提交。当前项目已为 9 个历史代码快照建立 Git tag 和 GitHub Release，包括 5 个正式版本和 4 个早期功能里程碑。
+- GitHub 版本：已经推送到 GitHub `main` 分支上的 Git 提交。当前项目已为 10 个历史代码快照建立 Git tag 和 GitHub Release，包括 6 个正式版本和 4 个早期功能里程碑。
 
 ## 本地缓存版本
 
@@ -120,7 +120,7 @@
 
 ## Git / GitHub 提交记录
 
-当前仓库已为以下 9 个历史代码快照建立 Git tag 和 GitHub Release。`bebc8b2` 仅更新缓存，`e3f468b` 仅更新文档，因此不单独建立 Release。
+当前仓库已为以下 10 个历史代码快照建立 Git tag 和 GitHub Release。`bebc8b2` 仅更新缓存，`e3f468b` 仅更新文档，因此不单独建立 Release。
 
 - `early-initial` -> `acf1e32` - Initial Workbuddy app：建立 Workbuddy 初始版本，包含每日计划的基础任务管理。
 - `early-canceled-task` -> `c4ced0e` - Add canceled task records：新增任务取消记录，保留取消原因和原日期。
@@ -131,6 +131,7 @@
 - `v68` -> `db89e96` - Release Workbuddy v68 updates：同步商品比价导出、每日英语自定义词组结构化编辑、Workbuddy 页面内模态框、商品比价分类 UI 和流程文档优化等本地累计功能。
 - `v72` -> `492c0c2` - Release Workbuddy v72 updates：同步知识文库 Markdown 表格预览、多文档标签页、保存校验、嵌套文件夹、文件夹移动、文件夹操作菜单收纳、Workbuddy 图标资源，以及商品比价和轻提示相关累计改动。
 - `v73` -> `d217827` - Release Workbuddy v73 updates：知识文库新增 ZIP 导入，支持批量导入文档和映射 ZIP 文件夹结构。
+- `v85` -> `d003713` - Release Workbuddy v85 updates：完成商品比价新规格结构、商品单位单价比较、购买记录表单排版和缓存版本 v85 更新。
 
 ## 发布维护规则
 
