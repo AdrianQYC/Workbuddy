@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f8fafc" />
     <title>Workbuddy</title>
-    <link rel="manifest" href="./manifest.webmanifest?v=85" />
+    <link rel="manifest" href="./manifest.webmanifest?v=93" />
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./icon-192.png" />
-    <link rel="stylesheet" href="./styles.css?v=85" />
+    <link rel="stylesheet" href="./styles.css?v=93" />
   </head>
   <body>
     <div class="app-shell">
@@ -17,6 +17,10 @@
           <p class="eyebrow" id="todayText">今日</p>
           <h1>Workbuddy</h1>
         </div>
+        <button class="icon-button desktop-settings-button" id="settingsButton" type="button" aria-label="设置" title="设置" hidden>
+          <span aria-hidden="true">⚙</span>
+          <span>设置</span>
+        </button>
       </header>
 
       <main class="planner">
@@ -33,6 +37,9 @@
             </button>
             <button class="module-button" type="button" data-module="shopping">
               <span>商品比价</span>
+            </button>
+            <button class="module-button" type="button" data-module="cocktail">
+              <span>调酒笔记</span>
             </button>
           </nav>
 
@@ -186,6 +193,7 @@
                 <option value="canceled">已取消</option>
               </select>
             </label>
+            <button class="save-button" type="submit">搜索</button>
             <button class="clear-search" id="clearSearch" type="button">清空</button>
           </form>
 
@@ -233,6 +241,46 @@
             </div>
             <p>这里还没有任务</p>
           </div>
+
+          <section class="cocktail-shell" id="cocktailShell" aria-label="调酒笔记" hidden>
+            <header class="cocktail-header">
+              <nav class="cocktail-nav" id="cocktailNav" aria-label="调酒笔记页面" role="tablist">
+                <button class="segment is-active" type="button" role="tab" aria-selected="true" data-cocktail-page="recommendations">推荐</button>
+                <button class="segment" type="button" role="tab" aria-selected="false" data-cocktail-page="recipes">配方</button>
+                <button class="segment" type="button" role="tab" aria-selected="false" data-cocktail-page="bar">吧台</button>
+              </nav>
+              <div class="cocktail-header-actions">
+                <button class="primary-button" id="newCocktailRecipeButton" type="button" hidden>新建配方</button>
+                <button class="primary-button" id="newCocktailMaterialButton" type="button" hidden>新建材料</button>
+                <div class="cocktail-editor-heading" id="cocktailEditorHeading" hidden>
+                  <h2 id="cocktailPageTitle">新建配方</h2>
+                  <button class="cancel-button" id="cocktailBackButton" type="button">返回配方</button>
+                </div>
+              </div>
+            </header>
+
+            <form class="cocktail-search-form" id="cocktailSearchForm">
+              <input id="cocktailSearchInput" type="search" placeholder="搜索调酒笔记" aria-label="搜索当前页面内容" />
+              <button class="primary-button" type="submit">搜索</button>
+              <button class="secondary-button" id="cocktailSearchClear" type="button">清除</button>
+            </form>
+
+            <section class="cocktail-page" data-cocktail-panel="recommendations" role="tabpanel">
+              <div id="cocktailRecommendationContent"></div>
+            </section>
+
+            <section class="cocktail-page" data-cocktail-panel="recipes" role="tabpanel" hidden>
+              <div id="cocktailRecipeContent"></div>
+            </section>
+
+            <section class="cocktail-page" data-cocktail-panel="bar" role="tabpanel" hidden>
+              <div id="cocktailBarContent"></div>
+            </section>
+
+            <section class="cocktail-page" data-cocktail-panel="new-recipe" aria-labelledby="cocktailPageTitle" hidden>
+              <div id="cocktailRecipeEditorContent"></div>
+            </section>
+          </section>
         </section>
       </main>
     </div>
@@ -253,6 +301,6 @@
       </article>
     </template>
 
-    <script src="./app.js?v=85" type="module"></script>
+    <script src="./app.js?v=93" type="module"></script>
   </body>
 </html>

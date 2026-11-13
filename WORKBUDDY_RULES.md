@@ -16,11 +16,15 @@
 - 不要求依赖旧聊天记录；交接文档应写清当前 Git 状态、缓存版本、未完成事项和关键风险。
 - 新对话接手时，本文件是流程规则的长期来源；交接文档也必须提醒新对话读取本文件，避免流程优化只留在旧对话里。
 - 生成或更新交接文档时，必须简要写入当前适用的流程档位规则：快改档、标准功能档、结构/数据档、发布/GitHub 档。
-- 生成 Workbuddy 新旧对话交接文档时，必须写入当前有效项目路径 `D:\Codex_projects\misc\Workbuddy`；旧路径 `C:\Users\qyc22\Documents\菜单\Workbuddy` 只作为历史迁移信息，不再作为默认工作路径。
+- 生成 Workbuddy 新旧对话交接文档时，必须写入本次确认的当前项目根目录；不要从旧聊天记录或历史迁移信息推断默认路径。
 - 按修改风险选择流程档位，避免简单修改触发完整维护流程。
 - 快改档：文案、小样式、按钮位置、局部 UI、单个 bug，且不改数据结构、备份、缓存、启动或跨模块逻辑时，只读相关代码即可，不必读 `WORKBUDDY_ARCHITECTURE.md` 和 `VERSION_HISTORY.md`。
 - 标准功能档：模块内新增或调整功能，但不改全局备份、不改存储结构、不影响其它模块时，读相关代码；只在需要确认模块边界时读 `WORKBUDDY_ARCHITECTURE.md` 对应小节。
 - 结构/数据档：涉及新模块、跨模块逻辑、localStorage 字段、导入导出、恢复数据、启动脚本、缓存策略、service worker 或较大重构时，必须读 `WORKBUDDY_ARCHITECTURE.md` 相关小节；需要提升缓存版本时再读 `VERSION_HISTORY.md`。
+- 浏览器代码版和 Electron 开发版使用同一套项目源码，不维护两套业务代码；Electron 通过桌面主进程提供系统接口。通用业务改动直接在项目源码中完成，再按功能选择浏览器版或 Electron 开发模式验收。
+- 测试入口按功能选择：浏览器版检查业务模块、普通页面和 Chrome 存储；Electron 开发模式检查桌面窗口、托盘和本地服务生命周期；开机自启动及安装行为只在安装版检查。测试入口和数据关系维护在 `开发与测试说明.md`。
+- Electron 开发模式与安装版共用 `%APPDATA%\Workbuddy`，调试前应提醒用户这会读写同一份桌面数据；浏览器版数据独立。浏览器版和 Electron 版共用端口 `5173`，不能同时运行。
+- 不因普通源码迭代自动生成 Electron 安装包；只有用户明确要求更新桌面软件时才打包。打包不等于安装、Git 提交、GitHub 上传或 Release 发布。
 - 发布/GitHub 档：用户确认满意并准备提交 Git 或上传 GitHub 前，再统一检查 README、桌面手册、架构文档、规则文档和版本说明是否需要补充。
 - 新功能要尽量独立，不能偷偷破坏旧功能或用户已经确认过的交互。
 - 涉及风险操作、导入覆盖、恢复数据、重构或项目外文件时，先说明再等待确认。
@@ -39,6 +43,9 @@
 - 每次提升本地缓存版本号时，必须同步更新 `VERSION_HISTORY.md` 中对应的本地缓存版本说明；不能等到上传 GitHub 时再补。
 - 每次确认上传 GitHub 前，还要检查 `VERSION_HISTORY.md` 是否需要补充 Git 提交或 GitHub 发布说明。
 - 每次完成 Git 提交并上传 GitHub 后，最终反馈里顺带提醒一句“未部署 Vercel”；这只是提醒，不需要实际部署或检查 Vercel。
+- Electron 桌面版的源码、`package.json` 和 `pnpm-lock.yaml` 纳入 Git；`node_modules/`、`.pnpm-store/`、`.build-tmp*/`、`release/` 和 Electron/打包工具缓存不纳入 Git。Windows 安装包如需分享，应单独作为 GitHub Release 附件发布。
+- Workbuddy 的 Electron 用户资料目录和导出的 JSON 备份都属于私人数据，不得提交或推送到 GitHub；JSON 通过 Workbuddy 的手动导入/导出在设备间迁移。
+- Windows 桌面安装包的固定安装目录为 `D:\SOFTWARE\Workbuddy`；运行数据与设置仍保存在 `%APPDATA%\Workbuddy`，除非用户另行确认迁移。
 
 ## 4. 文档维护
 
@@ -55,6 +62,7 @@
 - 不混用 `localhost`、`127.0.0.1`、`file://` 和 GitHub Pages 地址，因为它们在 Chrome 中是不同数据空间。
 - 桌面 `Workbuddy` 通过 `cmd.exe /c` 调用项目内 `启动Workbuddy.cmd`，用可见黑色终端窗口启动本地服务并打开 Chrome 应用窗口。
 - 使用期间保持黑色终端窗口打开；用完后关闭 Workbuddy 页面，再手动关闭黑色终端窗口。
+- 桌面 `Workbuddy.lnk` 是浏览器版入口；`Workbuddy开发模式.lnk` 是本机 Electron 开发预览入口。不要覆盖原浏览器快捷方式；Electron 开发模式读取当前源码且与安装版共用 `%APPDATA%\Workbuddy` 数据。
 - 修改前端文件后要考虑同步更新资源版本号和 `sw.js` 缓存名，避免旧缓存错乱。
 - 预览阶段如果用户只是想先看效果，可暂不提升缓存版本；确认成稿或需要稳定本地打开时再提升缓存版本并同步 `VERSION_HISTORY.md`。
 

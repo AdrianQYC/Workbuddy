@@ -6,11 +6,34 @@ const recurrenceStorageKey = "workbuddy.recurrences.v1";
 const englishStorageKey = "workbuddy.english.v1";
 const knowledgeStorageKey = "workbuddy.knowledge.v1";
 const shoppingStorageKey = "workbuddy.shopping.v1";
+const cocktailStorageKey = "workbuddy.cocktail.v1";
+const cocktailImageDatabaseName = "workbuddy-cocktail-images";
+const cocktailImageStoreName = "images";
+const cocktailImageBackupPrefix = "import-backup:";
 const legacyStorageKeys = ["daily-planner.tasks.v1"];
 const importBackupKey = "workbuddy.import-backup.v1";
 const legacyImportBackupKeys = ["daily-planner.import-backup.v1"];
 const shoppingPlatforms = ["淘宝", "京东", "拼多多", "抖音", "盒马", "阿里巴巴"];
+const cocktailRecipeUnits = ["mL", "g", "个", "片", "滴", "勺"];
+const cocktailMaterialCategories = [
+  { id: "base-spirit", name: "基础烈酒" },
+  { id: "liqueur", name: "利口酒" },
+  { id: "acidic", name: "酸性成分" },
+  { id: "sweet", name: "甜味成分" },
+  { id: "mixer", name: "调和液体" },
+  { id: "seasoning", name: "调味剂" },
+  { id: "garnish", name: "果蔬装饰" },
+  { id: "other", name: "其它" },
+];
+const cocktailRecommendationCategories = [
+  { id: "season", name: "时令" },
+  { id: "flavor", name: "风味" },
+  { id: "scene", name: "场景" },
+];
+const cocktailSolarTerms = ["小寒", "大寒", "立春", "雨水", "惊蛰", "春分", "清明", "谷雨", "立夏", "小满", "芒种", "夏至", "小暑", "大暑", "立秋", "处暑", "白露", "秋分", "寒露", "霜降", "立冬", "小雪", "大雪", "冬至"];
+const cocktailSolarTermMinutes = [0, 21208, 42467, 63836, 85337, 107014, 128867, 150921, 173149, 195551, 218072, 240693, 263343, 285989, 308563, 331033, 353350, 375494, 397447, 419210, 440795, 462224, 483532, 504758];
 let workbuddyToastTimer = null;
+let cocktailImageDatabasePromise = null;
 
 const state = {
   tasks: loadTasks(),
@@ -19,16 +42,52 @@ const state = {
   english: loadEnglish(),
   knowledge: loadKnowledge(),
   shopping: loadShopping(),
+  cocktail: loadCocktail(),
+  cocktailImageUrls: new Map(),
   module: "planner",
+  cocktailPage: "recommendations",
+  cocktailBar: {
+    view: "list",
+    categoryId: "all",
+    tagId: "all",
+    materialId: null,
+    editReturnView: "list",
+    returnToRecipeId: null,
+    returnToRecommendationRecipeId: null,
+  },
+  cocktailRecipes: {
+    view: "list",
+    categoryId: "all",
+    tagId: "all",
+    recipeId: null,
+    editingRecipeId: null,
+    editorReturnView: "list",
+  },
+  cocktailRecommendations: {
+    view: "home",
+    categoryId: null,
+    playlistId: null,
+    recipeId: null,
+  },
+  cocktailSearch: {
+    recommendations: { query: "", draft: "" },
+    recipes: { query: "", draft: "" },
+    bar: { query: "", draft: "" },
+  },
   selectedDate: toISODate(new Date()),
   view: "today",
   englishView: "today",
   knowledgeView: "categories",
+  settingsReturnModule: "planner",
+  desktopSettings: { minimizeToTray: false, openAtLogin: false, canSetOpenAtLogin: false },
+  shoppingViewMode: "category",
+  shoppingPlatformFilter: "all",
   shoppingCategoryId: "all",
   shoppingSubcategoryId: "all",
   shoppingTertiaryCategoryId: "all",
   shoppingSort: "custom",
   shoppingSearch: "",
+  shoppingSearchDraft: null,
   shoppingExpandedProductId: null,
   shoppingHighlightedProductId: null,
   shoppingRenamingProductId: null,
@@ -36,6 +95,7 @@ const state = {
   shoppingAddingRecordProductId: null,
   shoppingEditingRecordId: null,
   knowledgeSearch: "",
+  knowledgeSearchDraft: null,
   knowledgeCategorySort: "custom",
   knowledgeDocumentSort: "custom",
   knowledgeCreatingCategoryParentId: false,
@@ -57,6 +117,7 @@ const state = {
     status: "all",
   },
   englishSearch: "",
+  englishSearchDraft: null,
   englishLibraryFilter: "unlearned",
   englishLibrarySort: "az",
   englishReview: {
@@ -104,6 +165,7 @@ const elements = {
   taskDate: document.querySelector("#taskDate"),
   taskPriority: document.querySelector("#taskPriority"),
   taskList: document.querySelector("#taskList"),
+  settingsButton: document.querySelector("#settingsButton"),
   emptyState: document.querySelector("#emptyState"),
   mainPanel: document.querySelector(".main-panel"),
   listHeading: document.querySelector(".list-heading"),
@@ -119,6 +181,22 @@ const elements = {
   searchStatus: document.querySelector("#searchStatus"),
   clearSearch: document.querySelector("#clearSearch"),
   moduleButtons: document.querySelectorAll(".module-button"),
+  cocktailShell: document.querySelector("#cocktailShell"),
+  cocktailPageTitle: document.querySelector("#cocktailPageTitle"),
+  cocktailNav: document.querySelector("#cocktailNav"),
+  cocktailTabButtons: document.querySelectorAll("[data-cocktail-page]"),
+  cocktailPages: document.querySelectorAll("[data-cocktail-panel]"),
+  cocktailRecommendationContent: document.querySelector("#cocktailRecommendationContent"),
+  cocktailBackButton: document.querySelector("#cocktailBackButton"),
+  newCocktailRecipeButton: document.querySelector("#newCocktailRecipeButton"),
+  newCocktailMaterialButton: document.querySelector("#newCocktailMaterialButton"),
+  cocktailSearchForm: document.querySelector("#cocktailSearchForm"),
+  cocktailSearchInput: document.querySelector("#cocktailSearchInput"),
+  cocktailSearchClear: document.querySelector("#cocktailSearchClear"),
+  cocktailBarContent: document.querySelector("#cocktailBarContent"),
+  cocktailRecipeContent: document.querySelector("#cocktailRecipeContent"),
+  cocktailRecipeEditorContent: document.querySelector("#cocktailRecipeEditorContent"),
+  cocktailEditorHeading: document.querySelector("#cocktailEditorHeading"),
   plannerOverview: document.querySelector("#plannerOverview"),
   englishOverview: document.querySelector("#englishOverview"),
   englishTodayCount: document.querySelector("#englishTodayCount"),
@@ -193,12 +271,59 @@ function init() {
   elements.todayText.textContent = formatLongDate(new Date());
   renderBirthdaySelectOptions();
   bindEvents();
+  const isDesktop = Boolean(window.workbuddyDesktop);
+  elements.settingsButton.hidden = !isDesktop;
+  if (isDesktop) {
+    window.workbuddyDesktop.onOpenSettings(openSettingsView);
+    window.workbuddyDesktop.getSettings().then((settings) => {
+      state.desktopSettings = settings;
+      if (state.module === "settings") render();
+    }).catch(() => {
+      state.desktopSettings = { ...state.desktopSettings, canSetOpenAtLogin: false };
+      if (state.module === "settings") render();
+    });
+  }
   registerServiceWorker();
   renderBackupState();
   render();
+  hydrateCocktailImageUrls().then(() => {
+    refreshCurrentCocktailImageView();
+  }).catch(() => {
+    showWorkbuddyToast({ title: "吧台图片暂时无法读取", tone: "warning" });
+  });
+}
+
+function refreshCurrentCocktailImageView() {
+  if (state.module !== "cocktail") return;
+  if (state.cocktailPage === "new-recipe") {
+    if (!state.cocktailRecipes.pendingImageUrl) {
+      const recipe = state.cocktail.recipes.find((item) => item.id === state.cocktailRecipes.editingRecipeId);
+      const preview = elements.cocktailRecipeEditorContent.querySelector("#cocktailRecipeUploadPreview");
+      if (preview) preview.innerHTML = renderCocktailImage(recipe?.imageId ? state.cocktailImageUrls.get(recipe.imageId) : null, "cocktail-upload-image");
+    }
+    return;
+  }
+  if (state.cocktailPage === "bar" && ["new-material", "edit-material"].includes(state.cocktailBar.view)) {
+    if (!state.cocktailBar.pendingImageUrl) {
+      const material = state.cocktail.materials.find((item) => item.id === state.cocktailBar.materialId);
+      const preview = elements.cocktailBarContent.querySelector("#cocktailUploadPreview");
+      if (preview) preview.innerHTML = renderCocktailImage(material?.imageId ? state.cocktailImageUrls.get(material.imageId) : null, "cocktail-upload-image");
+    }
+    return;
+  }
+  renderCocktailModule();
 }
 
 function bindEvents() {
+  elements.settingsButton.addEventListener("click", () => {
+    if (state.module === "settings") {
+      state.module = state.settingsReturnModule;
+      render();
+      return;
+    }
+    openSettingsView();
+  });
+
   elements.taskForm.addEventListener("submit", (event) => {
     event.preventDefault();
     const title = elements.taskTitle.value.trim();
@@ -249,6 +374,57 @@ function bindEvents() {
     });
   });
 
+  elements.cocktailTabButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      state.module = "cocktail";
+      state.cocktailBar.returnToRecipeId = null;
+      state.cocktailBar.returnToRecommendationRecipeId = null;
+      state.cocktailPage = button.dataset.cocktailPage;
+      render();
+    });
+  });
+  elements.newCocktailRecipeButton.addEventListener("click", () => {
+    openCocktailRecipeEditor();
+  });
+  elements.newCocktailMaterialButton.addEventListener("click", () => {
+    state.module = "cocktail";
+    state.cocktailPage = "bar";
+    state.cocktailBar.returnToRecipeId = null;
+    state.cocktailBar.returnToRecommendationRecipeId = null;
+    state.cocktailBar.view = "new-material";
+    state.cocktailBar.formCategoryId = state.cocktailBar.categoryId === "all"
+      ? cocktailMaterialCategories[0].id
+      : state.cocktailBar.categoryId;
+    state.cocktailBar.materialId = null;
+    state.cocktailBar.pendingImageBlob = null;
+    state.cocktailBar.pendingImageUrl = null;
+    render();
+  });
+  elements.cocktailBackButton.addEventListener("click", () => {
+    closeCocktailRecipeEditor();
+  });
+  elements.cocktailBarContent.addEventListener("click", handleCocktailBarClick);
+  elements.cocktailBarContent.addEventListener("change", handleCocktailBarChange);
+  elements.cocktailSearchInput.addEventListener("input", () => {
+    const searchState = state.cocktailSearch[state.cocktailPage];
+    if (searchState) searchState.draft = elements.cocktailSearchInput.value;
+  });
+  elements.cocktailSearchForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const searchState = state.cocktailSearch[state.cocktailPage];
+    if (!searchState) return;
+    searchState.query = searchState.draft.trim().toLocaleLowerCase();
+    render();
+  });
+  elements.cocktailSearchClear.addEventListener("click", () => {
+    const searchState = state.cocktailSearch[state.cocktailPage];
+    if (!searchState) return;
+    searchState.query = "";
+    searchState.draft = "";
+    render();
+  });
+  elements.cocktailRecommendationContent.addEventListener("click", handleCocktailRecommendationClick);
+
   elements.segments.forEach((segment) => {
     segment.addEventListener("click", () => {
       state.view = segment.dataset.view;
@@ -283,22 +459,17 @@ function bindEvents() {
     });
   });
 
-  elements.searchKeyword.addEventListener("input", () => {
+  elements.searchPanel.addEventListener("submit", (event) => {
+    event.preventDefault();
     state.search.keyword = elements.searchKeyword.value.trim().toLowerCase();
-    renderList();
-  });
-  elements.searchDate.addEventListener("input", () => {
     state.search.date = elements.searchDate.value;
-    renderList();
-  });
-  elements.searchPriority.addEventListener("change", () => {
     state.search.priority = elements.searchPriority.value;
+    state.search.status = elements.searchStatus.value;
     renderSearchPrioritySelect();
     renderList();
   });
-  elements.searchStatus.addEventListener("change", () => {
-    state.search.status = elements.searchStatus.value;
-    renderList();
+  elements.searchPriority.addEventListener("change", () => {
+    renderSearchPrioritySelect();
   });
   elements.clearSearch.addEventListener("click", () => {
     state.search = { keyword: "", date: "", priority: "all", status: "all" };
@@ -365,15 +536,21 @@ function renderModules() {
   const isPlanner = state.module === "planner";
   const isEnglish = state.module === "english";
   const isKnowledge = state.module === "knowledge";
+  const isSettings = state.module === "settings";
+  const isCocktail = state.module === "cocktail";
   elements.moduleButtons.forEach((button) => {
     button.classList.toggle("is-active", button.dataset.module === state.module);
   });
   elements.plannerOverview.hidden = !isPlanner;
   elements.englishOverview.hidden = !isEnglish;
+  elements.cocktailShell.hidden = !isCocktail;
   elements.plannerSegments.hidden = !isPlanner;
   elements.englishSegments.hidden = !isEnglish;
   elements.knowledgeSegments.hidden = !isKnowledge;
-  elements.toolbar.hidden = state.module === "shopping";
+  elements.toolbar.hidden = state.module === "shopping" || isSettings || isCocktail;
+  elements.listHeading.hidden = isSettings || isCocktail;
+  elements.settingsButton.setAttribute("aria-pressed", String(isSettings));
+  elements.mainPanel.classList.toggle("is-cocktail-module", isCocktail);
   const compactModuleNav = isEnglish || isKnowledge;
   elements.mainPanel.classList.toggle("is-compact-module-nav", compactModuleNav);
   if (compactModuleNav && elements.viewMeta.parentElement !== elements.toolbar) {
@@ -514,6 +691,24 @@ function renderEnglishStats() {
 }
 
 function renderList() {
+  if (state.module === "cocktail") {
+    elements.taskList.innerHTML = "";
+    elements.taskList.classList.remove("is-medium-list", "is-reorderable");
+    elements.emptyState.hidden = true;
+    renderCocktailModule();
+    return;
+  }
+
+  if (state.module === "settings") {
+    elements.taskList.innerHTML = "";
+    elements.taskList.classList.remove("is-medium-list", "is-reorderable");
+    elements.emptyState.hidden = true;
+    elements.viewTitle.textContent = "设置";
+    elements.viewMeta.textContent = "";
+    renderDesktopSettingsShell();
+    return;
+  }
+
   const entries = filteredEntries();
   elements.taskList.innerHTML = "";
   elements.taskList.classList.toggle(
@@ -577,6 +772,1694 @@ function renderList() {
 
   entries.forEach(renderTaskEntry);
   if (state.view === "today") renderTodayRecurrences();
+}
+
+function renderCocktailModule() {
+  const isNewRecipe = state.cocktailPage === "new-recipe";
+  elements.cocktailShell.classList.toggle("is-recipe-editor", isNewRecipe);
+  elements.cocktailPageTitle.textContent = state.cocktailRecipes.editingRecipeId ? "编辑配方" : "新建配方";
+  elements.cocktailNav.hidden = isNewRecipe;
+  elements.cocktailEditorHeading.hidden = !isNewRecipe;
+  elements.cocktailBackButton.hidden = !isNewRecipe;
+  elements.newCocktailRecipeButton.hidden = state.cocktailPage !== "recipes";
+  elements.newCocktailMaterialButton.hidden = state.cocktailPage !== "bar";
+  elements.cocktailSearchForm.hidden = isNewRecipe;
+  const searchState = state.cocktailSearch[state.cocktailPage];
+  elements.cocktailSearchInput.value = searchState?.draft || "";
+  elements.cocktailSearchInput.placeholder = {
+    recommendations: "搜索推荐内容",
+    recipes: "搜索配方名称、材料或内容",
+    bar: "搜索材料名称或介绍",
+  }[state.cocktailPage] || "搜索调酒笔记";
+  elements.cocktailTabButtons.forEach((button) => {
+    const isActive = button.dataset.cocktailPage === state.cocktailPage;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+  });
+  elements.cocktailPages.forEach((page) => {
+    page.hidden = page.dataset.cocktailPanel !== state.cocktailPage;
+  });
+  if (state.cocktailPage === "recommendations") renderCocktailRecommendations();
+  if (state.cocktailPage === "bar") renderCocktailBar();
+  if (state.cocktailPage === "recipes") renderCocktailRecipes();
+  if (isNewRecipe) renderCocktailRecipeEditor();
+}
+
+function renderCocktailBar() {
+  const content = elements.cocktailBarContent;
+  if (state.cocktailBar.view === "material-detail") {
+    content.innerHTML = renderCocktailMaterialDetail();
+    return;
+  }
+  if (state.cocktailBar.view === "new-material" || state.cocktailBar.view === "edit-material") {
+    const material = state.cocktailBar.view === "edit-material"
+      ? state.cocktail.materials.find((item) => item.id === state.cocktailBar.materialId)
+      : null;
+    if (state.cocktailBar.view === "edit-material" && !material) {
+      state.cocktailBar.view = "list";
+      state.cocktailBar.materialId = null;
+      renderCocktailBar();
+      return;
+    }
+    content.innerHTML = renderCocktailMaterialForm(material);
+    content.querySelector('[data-cocktail-form="material"]')?.addEventListener("submit", handleCocktailBarSubmit);
+    return;
+  }
+
+  const currentCategory = state.cocktailBar.categoryId === "all"
+    ? null
+    : cocktailMaterialCategories.find((category) => category.id === state.cocktailBar.categoryId) || cocktailMaterialCategories[0];
+  state.cocktailBar.categoryId = currentCategory?.id || "all";
+  if (!currentCategory) state.cocktailBar.tagId = "all";
+  const tags = currentCategory ? state.cocktail.tags.filter((tag) => tag.categoryId === currentCategory.id) : [];
+  if (currentCategory && !["all", "unclassified"].includes(state.cocktailBar.tagId) && !tags.some((tag) => tag.id === state.cocktailBar.tagId)) {
+    state.cocktailBar.tagId = "all";
+  }
+  const visibleMaterials = getVisibleCocktailMaterials();
+  const activeTag = tags.find((tag) => tag.id === state.cocktailBar.tagId);
+  const isUnclassified = state.cocktailBar.tagId === "unclassified";
+  const isSpecificTag = Boolean(activeTag);
+  const tagName = activeTag?.name || (isUnclassified ? "未分类" : currentCategory?.name || "全部材料");
+
+  content.innerHTML = `
+    <div class="cocktail-bar-view">
+    <div class="cocktail-category-row" aria-label="材料一级分类">
+      <button class="segment${state.cocktailBar.categoryId === "all" ? " is-active" : ""}" type="button" data-cocktail-action="select-category" data-category-id="all">全部</button>
+      ${cocktailMaterialCategories.map((category) => `
+        <button class="segment${category.id === currentCategory?.id ? " is-active" : ""}" type="button" data-cocktail-action="select-category" data-category-id="${escapeHtml(category.id)}">${escapeHtml(category.name)}</button>
+      `).join("")}
+    </div>
+    ${currentCategory ? `<div class="cocktail-tag-row" aria-label="材料二级分类">
+      <button class="segment${state.cocktailBar.tagId === "all" ? " is-active" : ""}" type="button" data-cocktail-action="select-tag" data-tag-id="all">全部</button>
+      ${tags.map((tag) => `
+        <span class="cocktail-tag-option">
+          <button class="segment${tag.id === state.cocktailBar.tagId ? " is-active" : ""}" type="button" data-cocktail-action="select-tag" data-tag-id="${escapeHtml(tag.id)}">${escapeHtml(tag.name)}</button>
+          <button class="cocktail-tag-manage icon-button small" type="button" data-cocktail-action="manage-tag" data-tag-id="${escapeHtml(tag.id)}" title="管理${escapeHtml(tag.name)}标签" aria-label="管理${escapeHtml(tag.name)}标签">⋯</button>
+        </span>
+      `).join("")}
+      <button class="segment${isUnclassified ? " is-active" : ""}" type="button" data-cocktail-action="select-tag" data-tag-id="unclassified">未分类</button>
+      <button class="secondary-button" type="button" data-cocktail-action="create-tag">新增标签</button>
+    </div>` : ""}
+    <div class="cocktail-material-list">
+      ${visibleMaterials.length ? visibleMaterials.map(renderCocktailMaterialCard).join("") : `
+        <div class="cocktail-empty-card">
+          <strong>${escapeHtml(tagName)}暂无材料</strong>
+        </div>
+      `}
+    </div>
+    </div>
+  `;
+}
+
+function getVisibleCocktailMaterials() {
+  const query = state.cocktailSearch.bar.query;
+  return state.cocktail.materials.filter((material) => {
+    if (state.cocktailBar.categoryId !== "all" && material.categoryId !== state.cocktailBar.categoryId) return false;
+    if (state.cocktailBar.tagId !== "all") {
+      const matchesTag = state.cocktailBar.tagId === "unclassified" ? !material.tagId : material.tagId === state.cocktailBar.tagId;
+      if (!matchesTag) return false;
+    }
+    if (!query) return true;
+    return [material.nameZh, material.nameEn, material.introduction].some((value) => value.toLocaleLowerCase().includes(query));
+  });
+}
+
+function renderCocktailMaterialCard(material) {
+  const imageUrl = material.imageId ? state.cocktailImageUrls.get(material.imageId) : null;
+  return `
+    <article class="cocktail-material-card">
+      <button class="cocktail-material-open" type="button" data-cocktail-action="open-material" data-material-id="${escapeHtml(material.id)}">
+        ${renderCocktailImage(imageUrl, "cocktail-material-image")}
+        <span class="cocktail-material-copy">
+          <strong>${escapeHtml(material.nameZh)}</strong>
+          ${material.nameEn ? `<span class="cocktail-material-english">${escapeHtml(material.nameEn)}</span>` : ""}
+          <span class="cocktail-material-intro">${escapeHtml(material.introduction || "暂无介绍")}</span>
+        </span>
+      </button>
+      <div class="cocktail-material-card-actions">
+        <button class="secondary-button cocktail-material-edit-button" type="button" data-cocktail-action="edit-material" data-material-id="${escapeHtml(material.id)}">修改</button>
+        <button class="danger-button cocktail-material-delete-button" type="button" data-cocktail-action="delete-material" data-material-id="${escapeHtml(material.id)}">删除</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderCocktailMaterialDetail() {
+  const material = state.cocktail.materials.find((item) => item.id === state.cocktailBar.materialId);
+  if (!material) {
+    state.cocktailBar.view = "list";
+    state.cocktailBar.materialId = null;
+    return "";
+  }
+  const category = cocktailMaterialCategories.find((item) => item.id === material.categoryId);
+  const tag = state.cocktail.tags.find((item) => item.id === material.tagId);
+  const imageUrl = material.imageId ? state.cocktailImageUrls.get(material.imageId) : null;
+  return `
+    <div class="cocktail-detail-nav">
+      <button class="cancel-button" type="button" data-cocktail-action="back-to-materials">${state.cocktailBar.returnToRecommendationRecipeId ? "返回推荐配方" : state.cocktailBar.returnToRecipeId ? "返回配方" : "返回材料列表"}</button>
+    </div>
+    <article class="cocktail-material-detail">
+      ${renderCocktailImage(imageUrl, "cocktail-detail-image")}
+      <header class="cocktail-material-title">
+        <h3>${escapeHtml(material.nameZh)}</h3>
+        ${material.nameEn ? `<p>${escapeHtml(material.nameEn)}</p>` : ""}
+        <div class="cocktail-category-path">
+          <span>${escapeHtml(category?.name || "其它")}</span>
+          <span>${escapeHtml(tag?.name || "未分类")}</span>
+        </div>
+        <button class="secondary-button" type="button" data-cocktail-action="edit-material" data-material-id="${escapeHtml(material.id)}">修改材料</button>
+      </header>
+      <section class="cocktail-material-introduction">
+        <h4>介绍</h4>
+        <p>${escapeHtml(material.introduction || "暂无介绍")}</p>
+      </section>
+    </article>
+  `;
+}
+
+function renderCocktailImage(imageUrl, className) {
+  if (imageUrl) {
+    return `<div class="${className}"><img src="${escapeHtml(imageUrl)}" alt="" /></div>`;
+  }
+  return `<div class="${className} is-empty" aria-label="暂无图片">空</div>`;
+}
+
+function renderCocktailMaterialForm(material = null) {
+  const isEditing = Boolean(material);
+  const categoryId = state.cocktailBar.formCategoryId || material?.categoryId || state.cocktailBar.categoryId;
+  const tags = state.cocktail.tags.filter((tag) => tag.categoryId === categoryId);
+  const imageUrl = state.cocktailBar.pendingImageUrl
+    || (material?.imageId ? state.cocktailImageUrls.get(material.imageId) : null);
+  return `
+    <div class="cocktail-detail-nav">
+      <button class="cancel-button" type="button" data-cocktail-action="cancel-material-form">${isEditing ? (state.cocktailBar.editReturnView === "material-detail" ? "返回材料详情" : "返回材料列表") : "返回吧台"}</button>
+    </div>
+    <form class="cocktail-material-form" data-cocktail-form="material" data-material-mode="${isEditing ? "edit" : "new"}">
+      <h3>${isEditing ? "编辑材料" : "新建材料"}</h3>
+      <div class="cocktail-material-form-grid">
+        <label class="cocktail-field">
+          <span>中文名称（必填）</span>
+          <input name="nameZh" type="text" maxlength="100" value="${escapeHtml(material?.nameZh || "")}" required />
+        </label>
+        <label class="cocktail-field">
+          <span>英文名称（选填）</span>
+          <input name="nameEn" type="text" maxlength="120" value="${escapeHtml(material?.nameEn || "")}" />
+        </label>
+        <label class="cocktail-field">
+          <span>一级分类</span>
+          <select name="categoryId">${cocktailMaterialCategories.map((category) => `
+            <option value="${escapeHtml(category.id)}" ${category.id === categoryId ? "selected" : ""}>${escapeHtml(category.name)}</option>
+          `).join("")}</select>
+        </label>
+        <label class="cocktail-field">
+          <span>二级分类</span>
+          <select name="tagId">
+            <option value="" ${!material?.tagId || !tags.some((tag) => tag.id === material.tagId) ? "selected" : ""}>未分类</option>
+            ${tags.map((tag) => `<option value="${escapeHtml(tag.id)}" ${tag.id === material?.tagId ? "selected" : ""}>${escapeHtml(tag.name)}</option>`).join("")}
+          </select>
+        </label>
+        <label class="cocktail-field cocktail-field-wide">
+          <span>介绍</span>
+          <textarea name="introduction" rows="6" maxlength="5000">${escapeHtml(material?.introduction || "")}</textarea>
+        </label>
+        <div class="cocktail-field cocktail-field-wide">
+          <span>图片</span>
+          <div class="cocktail-upload-preview" id="cocktailUploadPreview">
+            ${renderCocktailImage(imageUrl, "cocktail-upload-image")}
+          </div>
+          <label class="backup-button import-button cocktail-image-picker">
+            选择图片
+            <input name="image" type="file" accept="image/*" />
+          </label>
+        </div>
+      </div>
+      <div class="cocktail-form-actions">
+        <button class="primary-button" type="submit">${isEditing ? "保存修改" : "保存材料"}</button>
+        <button class="cancel-button" type="button" data-cocktail-action="cancel-material-form">取消</button>
+      </div>
+    </form>
+  `;
+}
+
+function getResolvedRecipeIngredient(ingredient) {
+  const material = ingredient.materialId
+    ? state.cocktail.materials.find((item) => item.id === ingredient.materialId) || null
+    : null;
+  const categoryId = material?.categoryId
+    || (cocktailMaterialCategories.some((category) => category.id === ingredient.categoryId) ? ingredient.categoryId : "other");
+  const storedTag = state.cocktail.tags.find((tag) => tag.id === ingredient.tagId && tag.categoryId === categoryId);
+  return {
+    material,
+    categoryId,
+    tagId: material ? material.tagId : storedTag?.id || null,
+  };
+}
+
+function getCocktailSolarTerm(date = new Date()) {
+  const base = Date.UTC(1900, 0, 6, 2, 5);
+  const terms = [];
+  for (let year = date.getFullYear() - 1; year <= date.getFullYear(); year += 1) {
+    cocktailSolarTermMinutes.forEach((minutes, index) => {
+      const moment = new Date(base + 31556925974.7 * (year - 1900) + minutes * 60000);
+      terms.push({
+        name: cocktailSolarTerms[index],
+        day: new Date(moment.getFullYear(), moment.getMonth(), moment.getDate()).getTime(),
+      });
+    });
+  }
+  const targetDay = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  return terms.filter((term) => term.day <= targetDay).sort((a, b) => a.day - b.day).at(-1)?.name || cocktailSolarTerms.at(-1);
+}
+
+function getCocktailRecommendationPlaylist(categoryId, playlistId) {
+  return state.cocktail.recommendationPlaylists.find((playlist) => playlist.id === playlistId && playlist.categoryId === categoryId) || null;
+}
+
+function getCocktailFeaturedPlaylist(categoryId) {
+  const playlists = state.cocktail.recommendationPlaylists.filter((playlist) => playlist.categoryId === categoryId);
+  if (categoryId === "season") return playlists.find((playlist) => playlist.name === getCocktailSolarTerm()) || null;
+  return playlists.find((playlist) => playlist.isHome) || playlists[0] || null;
+}
+
+function matchesCocktailRecommendationSearch(playlist, recipe) {
+  const query = state.cocktailSearch.recommendations.query;
+  if (!query) return true;
+  const recipeText = recipe
+    ? [recipe.nameZh, recipe.nameEn, recipe.introduction, recipe.method, recipe.note,
+      ...recipe.ingredients.flatMap((ingredient) => [ingredient.materialName, ingredient.materialNameEn, ingredient.note])].join(" ")
+    : "";
+  return `${playlist.name} ${recipeText}`.toLocaleLowerCase().includes(query);
+}
+
+function renderCocktailRecommendations() {
+  const content = elements.cocktailRecommendationContent;
+  const view = state.cocktailRecommendations.view;
+  if (view === "recipe-detail") {
+    const recipe = state.cocktail.recipes.find((item) => item.id === state.cocktailRecommendations.recipeId);
+    if (!recipe) {
+      state.cocktailRecommendations.view = "playlist";
+      state.cocktailRecommendations.recipeId = null;
+      renderCocktailRecommendations();
+      return;
+    }
+    content.innerHTML = renderCocktailRecommendationRecipeDetail(recipe);
+    return;
+  }
+
+  if (view === "playlist") {
+    const playlist = getCocktailRecommendationPlaylist(state.cocktailRecommendations.categoryId, state.cocktailRecommendations.playlistId);
+    if (!playlist) {
+      state.cocktailRecommendations.view = "category";
+      state.cocktailRecommendations.playlistId = null;
+      renderCocktailRecommendations();
+      return;
+    }
+    const recipes = playlist.recipeIds
+      .map((id) => state.cocktail.recipes.find((recipe) => recipe.id === id))
+      .filter((recipe) => recipe && matchesCocktailRecommendationSearch(playlist, recipe));
+    const category = cocktailRecommendationCategories.find((item) => item.id === playlist.categoryId);
+    content.innerHTML = `
+      <div class="cocktail-recommendation-view">
+        <div class="cocktail-detail-nav">
+          <button class="cancel-button" type="button" data-recommendation-action="back-to-category">返回${escapeHtml(category?.name || "推荐")}</button>
+          <div class="cocktail-detail-actions">
+            <button class="secondary-button" type="button" data-recommendation-action="add-recipes" data-playlist-id="${escapeHtml(playlist.id)}">添加配方</button>
+            <button class="secondary-button" type="button" data-recommendation-action="manage-playlist" data-playlist-id="${escapeHtml(playlist.id)}">管理酒单</button>
+          </div>
+        </div>
+        <header class="cocktail-recommendation-heading"><div><h2>${escapeHtml(playlist.name)}</h2><p>${recipes.length} 条配方</p></div></header>
+        <div class="cocktail-recipe-list">
+          ${recipes.length ? recipes.map((recipe) => renderCocktailRecommendationRecipeCard(recipe, { playlistId: playlist.id, removable: true })).join("") : `<div class="cocktail-empty-card"><strong>${state.cocktailSearch.recommendations.query && playlist.recipeIds.length ? "没有匹配的配方" : state.cocktail.recipes.length ? "这个酒单里还没有配方" : "还没有可添加的配方"}</strong></div>`}
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  if (view === "category") {
+    const category = cocktailRecommendationCategories.find((item) => item.id === state.cocktailRecommendations.categoryId)
+      || cocktailRecommendationCategories[0];
+    state.cocktailRecommendations.categoryId = category.id;
+    const playlists = state.cocktail.recommendationPlaylists
+      .filter((playlist) => playlist.categoryId === category.id)
+      .filter((playlist) => !state.cocktailSearch.recommendations.query
+        || playlist.name.toLocaleLowerCase().includes(state.cocktailSearch.recommendations.query));
+    content.innerHTML = `
+      <div class="cocktail-recommendation-view">
+        <div class="cocktail-detail-nav">
+          <button class="cancel-button" type="button" data-recommendation-action="back-home">返回推荐</button>
+          <button class="primary-button" type="button" data-recommendation-action="create-playlist" data-category-id="${escapeHtml(category.id)}">新建酒单</button>
+        </div>
+        <header class="cocktail-recommendation-heading"><div><h2>${escapeHtml(category.name)}</h2><p>${playlists.length} 个酒单</p></div></header>
+        ${playlists.length ? `<div class="cocktail-playlist-list">${playlists.map((playlist) => renderCocktailPlaylistCard(playlist)).join("")}</div>` : `
+          <div class="cocktail-empty-card"><strong>${state.cocktailSearch.recommendations.query ? "没有匹配的酒单" : "这里还没有酒单"}</strong><span>${category.id === "season" ? `可以先建立“${escapeHtml(getCocktailSolarTerm())}”酒单。` : "创建酒单后，把配方加入对应推荐列表。"}</span></div>
+        `}
+      </div>
+    `;
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="cocktail-recommendation-view cocktail-recommendation-home">
+      ${cocktailRecommendationCategories.map((category) => {
+        const playlist = getCocktailFeaturedPlaylist(category.id);
+        const recipes = playlist
+          ? playlist.recipeIds.map((id) => state.cocktail.recipes.find((recipe) => recipe.id === id))
+            .filter((recipe) => recipe && matchesCocktailRecommendationSearch(playlist, recipe)).slice(0, 3)
+          : [];
+        const playlistName = category.id === "season" ? getCocktailSolarTerm() : "";
+        return `
+          <section class="cocktail-recommendation-section">
+            <div class="cocktail-recommendation-section-heading">
+              <h2>${escapeHtml(category.name)}</h2>
+              <button class="text-button" type="button" data-recommendation-action="open-category" data-category-id="${escapeHtml(category.id)}">更多</button>
+            </div>
+            ${playlist ? `
+              <div class="cocktail-featured-playlist-heading">
+                <h3>${escapeHtml(playlist.name)}</h3>
+                <button class="text-button" type="button" data-recommendation-action="open-playlist" data-category-id="${escapeHtml(category.id)}" data-playlist-id="${escapeHtml(playlist.id)}">更多</button>
+              </div>
+              ${recipes.length ? `<div class="cocktail-recommendation-recipe-list">${recipes.map((recipe) => renderCocktailRecommendationRecipeCard(recipe)).join("")}</div>` : `<p class="cocktail-muted cocktail-recommendation-empty">${state.cocktailSearch.recommendations.query ? "没有匹配的配方" : "这个酒单里还没有配方"}</p>`}
+            ` : `
+              <div class="cocktail-recommendation-empty-state">
+                <span>${category.id === "season" ? `${escapeHtml(playlistName)}酒单尚未建立` : "还没有推荐酒单"}</span>
+                <button class="secondary-button" type="button" data-recommendation-action="open-category" data-category-id="${escapeHtml(category.id)}">查看并管理</button>
+              </div>
+            `}
+          </section>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderCocktailPlaylistCard(playlist) {
+  const recipeCount = playlist.recipeIds.length;
+  const category = cocktailRecommendationCategories.find((item) => item.id === playlist.categoryId);
+  return `
+    <article class="cocktail-playlist-card">
+      <button class="cocktail-playlist-open" type="button" data-recommendation-action="open-playlist" data-category-id="${escapeHtml(playlist.categoryId)}" data-playlist-id="${escapeHtml(playlist.id)}">
+        <span><strong>${escapeHtml(playlist.name)}</strong><small>${recipeCount} 条配方${playlist.isHome ? " · 首页展示" : ""}</small></span>
+        <span aria-hidden="true">›</span>
+      </button>
+      <div class="cocktail-playlist-card-actions">
+        ${playlist.categoryId !== "season" && !playlist.isHome ? `<button class="secondary-button" type="button" data-recommendation-action="set-home-playlist" data-playlist-id="${escapeHtml(playlist.id)}">设为首页展示</button>` : ""}
+        <button class="secondary-button" type="button" data-recommendation-action="manage-playlist" data-playlist-id="${escapeHtml(playlist.id)}" aria-label="管理${escapeHtml(playlist.name)}">管理</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderCocktailRecommendationRecipeCard(recipe, { playlistId = "", removable = false } = {}) {
+  const imageUrl = recipe.imageId ? state.cocktailImageUrls.get(recipe.imageId) : null;
+  return `
+    <article class="cocktail-recipe-card cocktail-recommendation-recipe-card">
+      <button class="cocktail-recipe-open" type="button" data-recommendation-action="open-recipe" data-recipe-id="${escapeHtml(recipe.id)}">
+        ${renderCocktailImage(imageUrl, "cocktail-recipe-image")}
+        <span class="cocktail-recipe-card-copy">
+          <strong>${escapeHtml(recipe.nameZh)}</strong>
+          ${recipe.nameEn ? `<span class="cocktail-recipe-english">${escapeHtml(recipe.nameEn)}</span>` : ""}
+          <span class="cocktail-recipe-intro">${escapeHtml(recipe.introduction || "暂无简介")}</span>
+        </span>
+      </button>
+      ${removable ? `<div class="cocktail-recipe-card-actions"><button class="secondary-button" type="button" data-recommendation-action="remove-recipe" data-playlist-id="${escapeHtml(playlistId)}" data-recipe-id="${escapeHtml(recipe.id)}">从酒单移除</button></div>` : ""}
+    </article>
+  `;
+}
+
+function handleCocktailRecommendationClick(event) {
+  const button = event.target.closest("[data-recommendation-action]");
+  if (!button || !elements.cocktailRecommendationContent.contains(button)) return;
+  const action = button.dataset.recommendationAction;
+  if (action === "open-category") {
+    state.cocktailRecommendations.view = "category";
+    state.cocktailRecommendations.categoryId = button.dataset.categoryId;
+  } else if (action === "back-home") {
+    state.cocktailRecommendations.view = "home";
+  } else if (action === "back-to-category") {
+    state.cocktailRecommendations.view = "category";
+    state.cocktailRecommendations.playlistId = null;
+  } else if (action === "back-to-playlist") {
+    state.cocktailRecommendations.view = "playlist";
+    state.cocktailRecommendations.recipeId = null;
+  } else if (action === "open-playlist") {
+    state.cocktailRecommendations.view = "playlist";
+    state.cocktailRecommendations.categoryId = button.dataset.categoryId;
+    state.cocktailRecommendations.playlistId = button.dataset.playlistId;
+  } else if (action === "open-recipe") {
+    state.cocktailRecommendations.view = "recipe-detail";
+    state.cocktailRecommendations.recipeId = button.dataset.recipeId;
+  } else if (action === "open-material") {
+    const material = state.cocktail.materials.find((item) => item.id === button.dataset.materialId);
+    if (!material) return;
+    state.cocktailBar.returnToRecipeId = null;
+    state.cocktailBar.returnToRecommendationRecipeId = button.dataset.recipeId;
+    state.cocktailBar.materialId = material.id;
+    state.cocktailBar.view = "material-detail";
+    state.cocktailPage = "bar";
+  } else if (action === "create-playlist") {
+    openCocktailPlaylistNameDialog({ categoryId: button.dataset.categoryId });
+    return;
+  } else if (action === "manage-playlist") {
+    const playlist = state.cocktail.recommendationPlaylists.find((item) => item.id === button.dataset.playlistId);
+    if (playlist) openCocktailPlaylistManager(playlist);
+    return;
+  } else if (action === "set-home-playlist") {
+    setCocktailFeaturedPlaylist(button.dataset.playlistId);
+  } else if (action === "add-recipes") {
+    openCocktailAddRecipeDialog(button.dataset.playlistId);
+    return;
+  } else if (action === "remove-recipe") {
+    removeCocktailRecipeFromPlaylist(button.dataset.playlistId, button.dataset.recipeId);
+    return;
+  }
+  render();
+}
+
+function openCocktailPlaylistNameDialog({ categoryId, playlist = null }) {
+  const category = cocktailRecommendationCategories.find((item) => item.id === categoryId);
+  if (!category) return;
+  const body = document.createElement("form");
+  body.className = "cocktail-playlist-name-form";
+  body.innerHTML = `<label class="cocktail-field"><span>酒单名称</span><input name="name" type="text" maxlength="60" required value="${escapeHtml(playlist?.name || (category.id === "season" ? getCocktailSolarTerm() : ""))}" /></label><p class="cocktail-muted">删除酒单只会移除推荐分组，不会删除配方。</p>`;
+  const cancel = document.createElement("button");
+  cancel.className = "cancel-button";
+  cancel.type = "button";
+  cancel.textContent = "取消";
+  const save = document.createElement("button");
+  save.className = "primary-button";
+  save.type = "button";
+  save.textContent = playlist ? "保存名称" : "创建酒单";
+  const modal = openWorkbuddyModal({
+    title: playlist ? "重命名酒单" : `新建${category.name}酒单`,
+    body,
+    actions: [cancel, save],
+    initialFocusSelector: 'input[name="name"]',
+  });
+  cancel.addEventListener("click", modal.close);
+  const submit = () => {
+    const name = body.elements.name.value.trim();
+    if (!name) {
+      body.elements.name.reportValidity();
+      return;
+    }
+    const duplicate = state.cocktail.recommendationPlaylists.some((item) => item.categoryId === category.id
+      && item.id !== playlist?.id && item.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+    if (duplicate) {
+      showWorkbuddyMessageModal({ title: "酒单名称已存在", message: "请在这个分类中使用一个不同的酒单名称。" });
+      return;
+    }
+    let recommendationPlaylists;
+    let nextPlaylist;
+    if (playlist) {
+      recommendationPlaylists = state.cocktail.recommendationPlaylists.map((item) => item.id === playlist.id
+        ? { ...item, name, updatedAt: new Date().toISOString() }
+        : item);
+      nextPlaylist = { ...playlist, name };
+    } else {
+      const isHome = category.id !== "season"
+        && !state.cocktail.recommendationPlaylists.some((item) => item.categoryId === category.id && item.isHome);
+      nextPlaylist = { id: createId(), categoryId: category.id, name, recipeIds: [], isHome, createdAt: new Date().toISOString(), updatedAt: null };
+      recommendationPlaylists = [...state.cocktail.recommendationPlaylists, nextPlaylist];
+    }
+    if (!persistCocktailData({ ...state.cocktail, recommendationPlaylists })) return;
+    state.cocktailRecommendations.view = playlist ? state.cocktailRecommendations.view : "playlist";
+    state.cocktailRecommendations.categoryId = category.id;
+    state.cocktailRecommendations.playlistId = nextPlaylist.id;
+    modal.close();
+    render();
+    showWorkbuddyToast({ title: playlist ? "酒单名称已更新" : "酒单已创建" });
+  };
+  save.addEventListener("click", submit);
+  body.addEventListener("submit", (event) => { event.preventDefault(); submit(); });
+}
+
+function openCocktailPlaylistManager(playlist) {
+  const body = document.createElement("div");
+  body.className = "workbuddy-confirm-body";
+  body.textContent = playlist.categoryId === "season" ? "可以修改或删除这个酒单。" : "可以修改、删除酒单，或设置首页展示。";
+  const actions = [];
+  let modal;
+  const addAction = (label, className, handler) => {
+    const button = document.createElement("button");
+    button.className = className;
+    button.type = "button";
+    button.textContent = label;
+    actions.push(button);
+    button.addEventListener("click", handler);
+    return button;
+  };
+  addAction("重命名", "secondary-button", () => {
+    modal.close();
+    openCocktailPlaylistNameDialog({ categoryId: playlist.categoryId, playlist });
+  });
+  if (playlist.categoryId !== "season" && !playlist.isHome) {
+    addAction("设为首页展示", "secondary-button", () => {
+      modal.close();
+      setCocktailFeaturedPlaylist(playlist.id);
+      render();
+    });
+  }
+  addAction("删除酒单", "danger-button", async () => {
+    modal.close();
+    const confirmed = await confirmDangerAction({
+      title: "删除这个酒单？",
+      message: `“${playlist.name}”及其配方关联会被移除，配方本身不会删除。`,
+      confirmText: "删除酒单",
+    });
+    if (!confirmed) return;
+    const recommendationPlaylists = state.cocktail.recommendationPlaylists.filter((item) => item.id !== playlist.id);
+    if (!persistCocktailData({ ...state.cocktail, recommendationPlaylists })) return;
+    state.cocktailRecommendations.view = "category";
+    state.cocktailRecommendations.categoryId = playlist.categoryId;
+    state.cocktailRecommendations.playlistId = null;
+    render();
+    showWorkbuddyToast({ title: "酒单已删除" });
+  });
+  addAction("关闭", "cancel-button", () => modal.close());
+  modal = openWorkbuddyModal({ title: `管理“${playlist.name}”`, body, actions, initialFocusSelector: "button" });
+}
+
+function setCocktailFeaturedPlaylist(playlistId) {
+  const target = state.cocktail.recommendationPlaylists.find((item) => item.id === playlistId);
+  if (!target || target.categoryId === "season") return;
+  const recommendationPlaylists = state.cocktail.recommendationPlaylists.map((item) => item.categoryId === target.categoryId
+    ? { ...item, isHome: item.id === target.id, updatedAt: item.id === target.id ? new Date().toISOString() : item.updatedAt }
+    : item);
+  if (persistCocktailData({ ...state.cocktail, recommendationPlaylists })) {
+    showWorkbuddyToast({ title: `“${target.name}”已设为首页展示` });
+  }
+}
+
+function openCocktailAddRecipeDialog(playlistId) {
+  const playlist = state.cocktail.recommendationPlaylists.find((item) => item.id === playlistId);
+  if (!playlist) return;
+  const available = state.cocktail.recipes.filter((recipe) => !playlist.recipeIds.includes(recipe.id));
+  if (!available.length) {
+    showWorkbuddyMessageModal({ title: "没有可添加的配方", message: "所有现有配方都已在这个酒单中，或还没有创建配方。" });
+    return;
+  }
+  const body = document.createElement("div");
+  body.className = "cocktail-add-recipe-list";
+  body.innerHTML = available.map((recipe) => `
+    <label class="cocktail-add-recipe-option">
+      <input type="checkbox" value="${escapeHtml(recipe.id)}" />
+      <span><strong>${escapeHtml(recipe.nameZh)}</strong>${recipe.nameEn ? `<small>${escapeHtml(recipe.nameEn)}</small>` : ""}</span>
+    </label>
+  `).join("");
+  const cancel = document.createElement("button");
+  cancel.className = "cancel-button";
+  cancel.type = "button";
+  cancel.textContent = "取消";
+  const save = document.createElement("button");
+  save.className = "primary-button";
+  save.type = "button";
+  save.textContent = "加入酒单";
+  const modal = openWorkbuddyModal({ title: `添加配方到“${playlist.name}”`, body, actions: [cancel, save] });
+  cancel.addEventListener("click", modal.close);
+  save.addEventListener("click", () => {
+    const selectedIds = [...body.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
+    if (!selectedIds.length) {
+      showWorkbuddyMessageModal({ title: "还没有选择配方", message: "勾选至少一个配方后再加入酒单。" });
+      return;
+    }
+    const recommendationPlaylists = state.cocktail.recommendationPlaylists.map((item) => item.id === playlist.id
+      ? { ...item, recipeIds: [...item.recipeIds, ...selectedIds], updatedAt: new Date().toISOString() }
+      : item);
+    if (!persistCocktailData({ ...state.cocktail, recommendationPlaylists })) return;
+    modal.close();
+    render();
+    showWorkbuddyToast({ title: `已加入 ${selectedIds.length} 条配方` });
+  });
+}
+
+async function removeCocktailRecipeFromPlaylist(playlistId, recipeId) {
+  const playlist = state.cocktail.recommendationPlaylists.find((item) => item.id === playlistId);
+  const recipe = state.cocktail.recipes.find((item) => item.id === recipeId);
+  if (!playlist || !recipe || !playlist.recipeIds.includes(recipeId)) return;
+  const confirmed = await confirmDangerAction({
+    title: "从酒单移除配方？",
+    message: `“${recipe.nameZh}”只会从“${playlist.name}”中移除，配方本身仍保留在配方页面。`,
+    confirmText: "从酒单移除",
+  });
+  if (!confirmed) return;
+  const recommendationPlaylists = state.cocktail.recommendationPlaylists.map((item) => item.id === playlist.id
+    ? { ...item, recipeIds: item.recipeIds.filter((id) => id !== recipeId), updatedAt: new Date().toISOString() }
+    : item);
+  if (!persistCocktailData({ ...state.cocktail, recommendationPlaylists })) return;
+  render();
+  showWorkbuddyToast({ title: "已从酒单移除，配方仍保留" });
+}
+
+function getVisibleCocktailRecipes() {
+  const { categoryId, tagId } = state.cocktailRecipes;
+  const query = state.cocktailSearch.recipes.query;
+  return state.cocktail.recipes.filter((recipe) => {
+    if (categoryId !== "all") {
+      const matchesCategory = recipe.ingredients.some((ingredient) => {
+        const resolved = getResolvedRecipeIngredient(ingredient);
+        if (resolved.categoryId !== categoryId) return false;
+        if (tagId === "all") return true;
+        return tagId === "unclassified" ? !resolved.tagId : resolved.tagId === tagId;
+      });
+      if (!matchesCategory) return false;
+    }
+    if (!query) return true;
+    const ingredientText = recipe.ingredients.map((ingredient) => {
+      const resolved = getResolvedRecipeIngredient(ingredient);
+      return [resolved.material?.nameZh, resolved.material?.nameEn, ingredient.materialName, ingredient.materialNameEn, ingredient.note].join(" ");
+    }).join(" ");
+    const searchable = [recipe.nameZh, recipe.nameEn, recipe.introduction, recipe.method, recipe.note, ingredientText]
+      .join(" ")
+      .toLocaleLowerCase();
+    return searchable.includes(query);
+  });
+}
+
+function renderCocktailRecipes() {
+  const content = elements.cocktailRecipeContent;
+  if (state.cocktailRecipes.view === "detail") {
+    content.innerHTML = renderCocktailRecipeDetail();
+    bindCocktailRecipeActions(content);
+    return;
+  }
+
+  const currentCategory = state.cocktailRecipes.categoryId === "all"
+    ? null
+    : cocktailMaterialCategories.find((category) => category.id === state.cocktailRecipes.categoryId) || cocktailMaterialCategories[0];
+  state.cocktailRecipes.categoryId = currentCategory?.id || "all";
+  if (!currentCategory) state.cocktailRecipes.tagId = "all";
+  const tags = currentCategory ? state.cocktail.tags.filter((tag) => tag.categoryId === currentCategory.id) : [];
+  if (currentCategory && !["all", "unclassified"].includes(state.cocktailRecipes.tagId) && !tags.some((tag) => tag.id === state.cocktailRecipes.tagId)) {
+    state.cocktailRecipes.tagId = "all";
+  }
+  const activeTag = tags.find((tag) => tag.id === state.cocktailRecipes.tagId);
+  const isUnclassified = state.cocktailRecipes.tagId === "unclassified";
+  const visibleRecipes = getVisibleCocktailRecipes();
+  const filterName = activeTag?.name || (isUnclassified ? "未分类" : currentCategory?.name || "全部配方");
+
+  content.innerHTML = `
+    <div class="cocktail-recipe-view">
+      <div class="cocktail-category-row" aria-label="配方一级分类">
+        <button class="segment${state.cocktailRecipes.categoryId === "all" ? " is-active" : ""}" type="button" data-recipe-action="select-category" data-category-id="all">全部</button>
+        ${cocktailMaterialCategories.map((category) => `
+          <button class="segment${category.id === currentCategory?.id ? " is-active" : ""}" type="button" data-recipe-action="select-category" data-category-id="${escapeHtml(category.id)}">${escapeHtml(category.name)}</button>
+        `).join("")}
+      </div>
+      ${currentCategory ? `
+        <div class="cocktail-tag-row" aria-label="配方二级分类">
+          <button class="segment${state.cocktailRecipes.tagId === "all" ? " is-active" : ""}" type="button" data-recipe-action="select-tag" data-tag-id="all">全部</button>
+          ${tags.map((tag) => `
+            <span class="cocktail-tag-option">
+              <button class="segment${tag.id === state.cocktailRecipes.tagId ? " is-active" : ""}" type="button" data-recipe-action="select-tag" data-tag-id="${escapeHtml(tag.id)}">${escapeHtml(tag.name)}</button>
+            </span>
+          `).join("")}
+          <button class="segment${isUnclassified ? " is-active" : ""}" type="button" data-recipe-action="select-tag" data-tag-id="unclassified">未分类</button>
+        </div>
+      ` : ""}
+      <div class="cocktail-recipe-list">
+        ${visibleRecipes.length ? visibleRecipes.map(renderCocktailRecipeCard).join("") : `
+          <div class="cocktail-empty-card"><strong>${escapeHtml(filterName)}暂无配方</strong></div>
+        `}
+      </div>
+    </div>
+  `;
+  bindCocktailRecipeActions(content);
+}
+
+function bindCocktailRecipeActions(content) {
+  content.querySelectorAll("[data-recipe-action]").forEach((button) => {
+    button.addEventListener("click", handleCocktailRecipeClick);
+  });
+}
+
+function renderCocktailRecipeCard(recipe) {
+  const imageUrl = recipe.imageId ? state.cocktailImageUrls.get(recipe.imageId) : null;
+  return `
+    <article class="cocktail-recipe-card">
+      <button class="cocktail-recipe-open" type="button" data-recipe-action="open-recipe" data-recipe-id="${escapeHtml(recipe.id)}">
+        ${renderCocktailImage(imageUrl, "cocktail-recipe-image")}
+        <span class="cocktail-recipe-card-copy">
+          <strong>${escapeHtml(recipe.nameZh)}</strong>
+          ${recipe.nameEn ? `<span class="cocktail-recipe-english">${escapeHtml(recipe.nameEn)}</span>` : ""}
+          <span class="cocktail-recipe-intro">${escapeHtml(recipe.introduction || "暂无简介")}</span>
+        </span>
+      </button>
+      <div class="cocktail-recipe-card-actions">
+        <button class="secondary-button" type="button" data-recipe-action="edit-recipe" data-recipe-id="${escapeHtml(recipe.id)}">编辑</button>
+        <button class="danger-button" type="button" data-recipe-action="delete-recipe" data-recipe-id="${escapeHtml(recipe.id)}">删除</button>
+      </div>
+    </article>
+  `;
+}
+
+function calculateCocktailRecipeAbv(ingredients) {
+  const liquidRows = ingredients.filter((ingredient) => ingredient.unit === "mL");
+  const totalVolume = liquidRows.reduce((sum, ingredient) => sum + Math.max(0, Number(ingredient.amount) || 0), 0);
+  if (!totalVolume) return 0;
+  const alcoholUnits = liquidRows.reduce((sum, ingredient) => {
+    const amount = Math.max(0, Number(ingredient.amount) || 0);
+    const abv = Math.max(0, Math.min(100, Number(ingredient.abv) || 0));
+    return sum + amount * (abv / 100);
+  }, 0);
+  return (alcoholUnits / totalVolume) * 100;
+}
+
+function renderCocktailRecipeDetail() {
+  const recipe = state.cocktail.recipes.find((item) => item.id === state.cocktailRecipes.recipeId);
+  if (!recipe) {
+    state.cocktailRecipes.view = "list";
+    state.cocktailRecipes.recipeId = null;
+    return `<div class="cocktail-empty-card"><strong>找不到这条配方</strong></div>`;
+  }
+  return renderCocktailRecipeDetailContent(recipe);
+}
+
+function renderCocktailRecommendationRecipeDetail(recipe) {
+  return renderCocktailRecipeDetailContent(recipe, { recommendation: true });
+}
+
+function renderCocktailRecipeDetailContent(recipe, { recommendation = false } = {}) {
+  const imageUrl = recipe.imageId ? state.cocktailImageUrls.get(recipe.imageId) : null;
+  const abv = calculateCocktailRecipeAbv(recipe.ingredients);
+  return `
+    <div class="cocktail-detail-nav">
+      <button class="cancel-button" type="button" ${recommendation ? 'data-recommendation-action="back-to-playlist"' : 'data-recipe-action="back-to-recipes"'}>${recommendation ? "返回酒单" : "返回配方列表"}</button>
+      ${recommendation ? "" : `
+        <div class="cocktail-detail-actions">
+          <button class="secondary-button" type="button" data-recipe-action="edit-recipe" data-recipe-id="${escapeHtml(recipe.id)}">编辑配方</button>
+          <button class="danger-button" type="button" data-recipe-action="delete-recipe" data-recipe-id="${escapeHtml(recipe.id)}">删除配方</button>
+        </div>
+      `}
+    </div>
+    <article class="cocktail-recipe-detail">
+      ${renderCocktailImage(imageUrl, "cocktail-detail-image")}
+      <header class="cocktail-recipe-title">
+        <h3>${escapeHtml(recipe.nameZh)}</h3>
+        ${recipe.nameEn ? `<p>${escapeHtml(recipe.nameEn)}</p>` : ""}
+        <strong class="cocktail-recipe-abv">最终酒精度 ${abv.toFixed(1)}%</strong>
+      </header>
+      <section class="cocktail-recipe-section cocktail-recipe-description">
+        <h4>简介</h4>
+        <p>${escapeHtml(recipe.introduction || "暂无简介")}</p>
+      </section>
+      <section class="cocktail-recipe-section cocktail-recipe-ingredients">
+        <h4>材料</h4>
+        ${recipe.ingredients.length ? `
+          <div class="cocktail-recipe-ingredient-list">
+            ${recipe.ingredients.map((ingredient) => renderCocktailRecipeIngredient(ingredient, recipe.id, recommendation ? "recommendation" : "recipe")).join("")}
+          </div>
+        ` : `<p class="cocktail-muted">暂无材料</p>`}
+      </section>
+      <section class="cocktail-recipe-section">
+        <h4>制作方法</h4>
+        <p>${escapeHtml(recipe.method || "暂无制作方法")}</p>
+      </section>
+      <section class="cocktail-recipe-section">
+        <h4>备注</h4>
+        <p>${escapeHtml(recipe.note || "暂无备注")}</p>
+      </section>
+    </article>
+  `;
+}
+
+function renderCocktailRecipeIngredient(ingredient, recipeId, linkAction = "recipe") {
+  const resolved = getResolvedRecipeIngredient(ingredient);
+  const name = resolved.material?.nameZh || ingredient.materialName || "未命名材料";
+  const detail = `${Number(ingredient.amount) || 0} ${ingredient.unit} · ${Number(ingredient.abv) || 0}%`;
+  return `
+    <div class="cocktail-recipe-ingredient">
+      <div class="cocktail-recipe-ingredient-main">
+        ${resolved.material ? `
+          <button class="cocktail-recipe-material-link" type="button" data-${linkAction}-action="open-material" data-recipe-id="${escapeHtml(recipeId)}" data-material-id="${escapeHtml(resolved.material.id)}">${escapeHtml(name)}</button>
+        ` : `<span class="cocktail-recipe-material-missing" title="吧台材料已删除">${escapeHtml(name)}</span>`}
+        <span>${escapeHtml(detail)}</span>
+      </div>
+      ${ingredient.note ? `<p>${escapeHtml(ingredient.note)}</p>` : ""}
+    </div>
+  `;
+}
+
+function renderCocktailRecipeEditor() {
+  const recipe = state.cocktailRecipes.editingRecipeId
+    ? state.cocktail.recipes.find((item) => item.id === state.cocktailRecipes.editingRecipeId)
+    : null;
+  if (state.cocktailRecipes.editingRecipeId && !recipe) {
+    state.cocktailRecipes.editingRecipeId = null;
+    state.cocktailPage = "recipes";
+    renderCocktailModule();
+    return;
+  }
+  const pendingUrl = state.cocktailRecipes.pendingImageUrl;
+  const imageUrl = pendingUrl || (recipe?.imageId ? state.cocktailImageUrls.get(recipe.imageId) : null);
+  const ingredients = recipe ? recipe.ingredients : [null];
+  elements.cocktailRecipeEditorContent.innerHTML = `
+    <form class="cocktail-recipe-editor" data-cocktail-recipe-form data-recipe-mode="${recipe ? "edit" : "new"}">
+      <div class="cocktail-recipe-editor-grid">
+        <label class="cocktail-field">
+          <span>中文标题（必填）</span>
+          <input name="nameZh" type="text" maxlength="120" value="${escapeHtml(recipe?.nameZh || "")}" required />
+        </label>
+        <label class="cocktail-field">
+          <span>英文标题（选填）</span>
+          <input name="nameEn" type="text" maxlength="160" value="${escapeHtml(recipe?.nameEn || "")}" />
+        </label>
+        <label class="cocktail-field cocktail-field-wide">
+          <span>简介</span>
+          <textarea name="introduction" rows="3" maxlength="3000">${escapeHtml(recipe?.introduction || "")}</textarea>
+        </label>
+        <div class="cocktail-field cocktail-field-wide">
+          <span>配方图片</span>
+          <div class="cocktail-upload-preview" id="cocktailRecipeUploadPreview">${renderCocktailImage(imageUrl, "cocktail-upload-image")}</div>
+          <label class="backup-button import-button cocktail-image-picker">
+            选择图片
+            <input name="recipeImage" type="file" accept="image/*" />
+          </label>
+        </div>
+      </div>
+
+      <section class="cocktail-ingredients-editor">
+        <div class="cocktail-recipe-section-heading">
+          <h3>材料</h3>
+          <p>选择吧台材料；只有 mL 用量会计入最终酒精度。</p>
+        </div>
+        <div class="cocktail-recipe-ingredient-rows" id="cocktailRecipeIngredientRows">
+          ${ingredients.map(renderCocktailRecipeIngredientEditorRow).join("")}
+        </div>
+        <button class="secondary-button" type="button" data-recipe-action="add-ingredient">添加一行</button>
+        <div class="cocktail-recipe-calculation">
+          <strong>最终酒精度 <span id="cocktailRecipeAbvPreview">${calculateCocktailRecipeAbv(recipe?.ingredients || []).toFixed(1)}%</span></strong>
+          <p id="cocktailRecipeAbvWarning" hidden>非 mL 单位的材料不参与计算；含酒精材料请用 mL 记录。</p>
+        </div>
+      </section>
+
+      <label class="cocktail-field cocktail-field-wide">
+        <span>制作方法</span>
+        <textarea name="method" rows="6" maxlength="8000">${escapeHtml(recipe?.method || "")}</textarea>
+      </label>
+      <label class="cocktail-field cocktail-field-wide">
+        <span>备注</span>
+        <textarea name="note" rows="4" maxlength="5000">${escapeHtml(recipe?.note || "")}</textarea>
+      </label>
+      <div class="cocktail-form-actions">
+        <button class="primary-button" type="submit">${recipe ? "保存修改" : "保存配方"}</button>
+        <button class="cancel-button" type="button" data-recipe-action="cancel-editor">取消</button>
+      </div>
+    </form>
+  `;
+  const form = elements.cocktailRecipeEditorContent.querySelector("[data-cocktail-recipe-form]");
+  form?.addEventListener("submit", handleCocktailRecipeEditorSubmit);
+  form?.addEventListener("click", handleCocktailRecipeEditorClick);
+  form?.addEventListener("input", handleCocktailRecipeEditorInput);
+  form?.addEventListener("change", handleCocktailRecipeEditorChange);
+  updateCocktailRecipeAbvPreview();
+}
+
+function renderCocktailIngredientMaterialChip(name, detail, isMissing = false) {
+  return `
+    <div class="cocktail-selected-material${isMissing ? " is-missing" : ""}">
+      <span><strong>${escapeHtml(name)}</strong><small>${escapeHtml(detail)}</small></span>
+      <button class="cocktail-material-change" type="button" data-recipe-action="clear-material" aria-label="更换材料" title="更换材料">×</button>
+    </div>
+  `;
+}
+
+function renderCocktailRecipeIngredientEditorRow(ingredient = null) {
+  const resolved = ingredient ? getResolvedRecipeIngredient(ingredient) : { material: null, categoryId: null, tagId: null };
+  const materialName = resolved.material?.nameZh || ingredient?.materialName || "";
+  const materialNameEn = resolved.material?.nameEn || ingredient?.materialNameEn || "";
+  const category = cocktailMaterialCategories.find((item) => item.id === resolved.categoryId);
+  const tag = state.cocktail.tags.find((item) => item.id === resolved.tagId);
+  const isSelected = Boolean(ingredient?.materialId && materialName);
+  const isMissing = Boolean(isSelected && !resolved.material);
+  return `
+    <div class="cocktail-ingredient-row" data-cocktail-ingredient-row
+      data-ingredient-id="${escapeHtml(ingredient?.id || "")}"
+      data-material-id="${escapeHtml(ingredient?.materialId || "")}"
+      data-material-name="${escapeHtml(materialName)}"
+      data-material-name-en="${escapeHtml(materialNameEn)}"
+      data-category-id="${escapeHtml(resolved.categoryId || "")}"
+      data-tag-id="${escapeHtml(resolved.tagId || "")}">
+      <div class="cocktail-field cocktail-ingredient-material">
+        <span>材料</span>
+        <div class="cocktail-material-combobox">
+          ${isSelected ? `
+            ${renderCocktailIngredientMaterialChip(materialName, isMissing ? "材料已删除" : `${category?.name || ""} · ${tag?.name || "未分类"}`, isMissing)}
+          ` : `
+            <input class="cocktail-material-search" type="search" autocomplete="off" aria-autocomplete="list" placeholder="输入关键字搜索已有材料" aria-label="搜索吧台已有材料" />
+            <div class="cocktail-material-suggestions" role="listbox" hidden></div>
+          `}
+        </div>
+      </div>
+      <label class="cocktail-field">
+        <span>度数（%）</span>
+        <input data-recipe-abv type="number" min="0" max="100" step="0.1" value="${escapeHtml(String(ingredient?.abv ?? 0))}" />
+      </label>
+      <label class="cocktail-field">
+        <span>用量</span>
+        <input data-recipe-amount type="number" min="0" step="0.1" value="${escapeHtml(String(ingredient?.amount ?? 0))}" />
+      </label>
+      <label class="cocktail-field">
+        <span>单位</span>
+        <select data-recipe-unit>${cocktailRecipeUnits.map((unit) => `<option value="${escapeHtml(unit)}" ${unit === (ingredient?.unit || "mL") ? "selected" : ""}>${escapeHtml(unit)}</option>`).join("")}</select>
+      </label>
+      <label class="cocktail-field cocktail-ingredient-note">
+        <span>材料备注</span>
+        <input data-recipe-note type="text" maxlength="500" value="${escapeHtml(ingredient?.note || "")}" />
+      </label>
+      <button class="icon-button small cocktail-ingredient-remove" type="button" data-recipe-action="remove-ingredient" aria-label="删除材料行" title="删除材料行">×</button>
+    </div>
+  `;
+}
+
+function openCocktailRecipeEditor(recipeId = null) {
+  const recipe = recipeId ? state.cocktail.recipes.find((item) => item.id === recipeId) : null;
+  if (recipeId && !recipe) return;
+  state.cocktailRecipes.editorReturnView = recipe && state.cocktailRecipes.view === "detail" ? "detail" : "list";
+  state.cocktailRecipes.editingRecipeId = recipe?.id || null;
+  state.cocktailRecipes.pendingImageBlob = null;
+  state.cocktailRecipes.pendingImageUrl = null;
+  state.module = "cocktail";
+  state.cocktailPage = "new-recipe";
+  render();
+}
+
+function closeCocktailRecipeEditor() {
+  if (state.cocktailRecipes.pendingImageUrl) URL.revokeObjectURL(state.cocktailRecipes.pendingImageUrl);
+  state.cocktailRecipes.pendingImageBlob = null;
+  state.cocktailRecipes.pendingImageUrl = null;
+  state.cocktailPage = "recipes";
+  state.cocktailRecipes.view = state.cocktailRecipes.editorReturnView === "detail"
+    && state.cocktail.recipes.some((recipe) => recipe.id === state.cocktailRecipes.editingRecipeId)
+    ? "detail"
+    : "list";
+  if (state.cocktailRecipes.view === "list") state.cocktailRecipes.recipeId = null;
+  state.cocktailRecipes.editingRecipeId = null;
+  render();
+}
+
+async function handleCocktailRecipeClick(event) {
+  const button = event.target.closest("[data-recipe-action]");
+  if (!button || !elements.cocktailRecipeContent.contains(button)) return;
+  const action = button.dataset.recipeAction;
+  if (action === "select-category") {
+    state.cocktailRecipes.categoryId = button.dataset.categoryId;
+    state.cocktailRecipes.tagId = "all";
+    render();
+  } else if (action === "select-tag") {
+    state.cocktailRecipes.tagId = button.dataset.tagId;
+    render();
+  } else if (action === "open-recipe") {
+    state.cocktailRecipes.recipeId = button.dataset.recipeId;
+    state.cocktailRecipes.view = "detail";
+    render();
+  } else if (action === "edit-recipe") {
+    openCocktailRecipeEditor(button.dataset.recipeId);
+  } else if (action === "delete-recipe") {
+    await deleteCocktailRecipe(button.dataset.recipeId);
+  } else if (action === "back-to-recipes") {
+    state.cocktailRecipes.view = "list";
+    state.cocktailRecipes.recipeId = null;
+    render();
+  } else if (action === "open-material") {
+    const material = state.cocktail.materials.find((item) => item.id === button.dataset.materialId);
+    if (!material) return;
+    state.cocktailRecipes.recipeId = button.dataset.recipeId;
+    state.cocktailRecipes.view = "detail";
+    state.cocktailBar.returnToRecipeId = button.dataset.recipeId;
+    state.cocktailBar.materialId = material.id;
+    state.cocktailBar.view = "material-detail";
+    state.cocktailPage = "bar";
+    render();
+  }
+}
+
+async function handleCocktailRecipeEditorClick(event) {
+  const button = event.target.closest("[data-recipe-action]");
+  if (!button || !elements.cocktailRecipeEditorContent.contains(button)) return;
+  const action = button.dataset.recipeAction;
+  if (action === "add-ingredient") {
+    const rows = elements.cocktailRecipeEditorContent.querySelector("#cocktailRecipeIngredientRows");
+    if (!rows) return;
+    rows.insertAdjacentHTML("beforeend", renderCocktailRecipeIngredientEditorRow());
+    const addedRow = rows.lastElementChild;
+    addedRow?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    addedRow?.querySelector(".cocktail-material-search")?.focus({ preventScroll: true });
+  } else if (action === "remove-ingredient") {
+    button.closest("[data-cocktail-ingredient-row]")?.remove();
+    updateCocktailRecipeAbvPreview();
+  } else if (action === "clear-material") {
+    const row = button.closest("[data-cocktail-ingredient-row]");
+    if (!row) return;
+    row.dataset.materialId = "";
+    row.dataset.materialName = "";
+    row.dataset.materialNameEn = "";
+    row.dataset.categoryId = "";
+    row.dataset.tagId = "";
+    row.querySelector(".cocktail-material-combobox").innerHTML = `
+      <input class="cocktail-material-search" type="search" autocomplete="off" aria-autocomplete="list" placeholder="输入关键字搜索已有材料" aria-label="搜索吧台已有材料" />
+      <div class="cocktail-material-suggestions" role="listbox" hidden></div>
+    `;
+    row.querySelector(".cocktail-material-search")?.focus();
+  } else if (action === "select-material") {
+    const row = button.closest("[data-cocktail-ingredient-row]");
+    const material = state.cocktail.materials.find((item) => item.id === button.dataset.materialId);
+    if (!row || !material) return;
+    row.dataset.materialId = material.id;
+    row.dataset.materialName = material.nameZh;
+    row.dataset.materialNameEn = material.nameEn;
+    row.dataset.categoryId = material.categoryId;
+    row.dataset.tagId = material.tagId || "";
+    const category = cocktailMaterialCategories.find((item) => item.id === material.categoryId);
+    const tag = state.cocktail.tags.find((item) => item.id === material.tagId);
+    row.querySelector(".cocktail-material-combobox").innerHTML = renderCocktailIngredientMaterialChip(
+      material.nameZh,
+      `${category?.name || ""} · ${tag?.name || "未分类"}`,
+    );
+  } else if (action === "cancel-editor") {
+    closeCocktailRecipeEditor();
+  }
+}
+
+function handleCocktailRecipeEditorInput(event) {
+  const input = event.target;
+  if (input.matches(".cocktail-material-search")) {
+    const row = input.closest("[data-cocktail-ingredient-row]");
+    const suggestions = row?.querySelector(".cocktail-material-suggestions");
+    if (!row || !suggestions) return;
+    const query = input.value.trim().toLocaleLowerCase();
+    if (!query) {
+      suggestions.innerHTML = "";
+      suggestions.hidden = true;
+      return;
+    }
+    const matches = state.cocktail.materials
+      .filter((material) => `${material.nameZh} ${material.nameEn}`.toLocaleLowerCase().includes(query))
+      .slice(0, 8);
+    suggestions.innerHTML = matches.length ? matches.map((material) => `
+      <button class="cocktail-material-suggestion" type="button" role="option" data-recipe-action="select-material" data-material-id="${escapeHtml(material.id)}">
+        <strong>${escapeHtml(material.nameZh)}</strong><span>${escapeHtml(material.nameEn || "")}</span>
+      </button>
+    `).join("") : `<p class="cocktail-material-no-suggestions">没有找到材料</p>`;
+    suggestions.hidden = false;
+    return;
+  }
+  if (input.matches("[data-recipe-abv], [data-recipe-amount]")) updateCocktailRecipeAbvPreview();
+}
+
+async function handleCocktailRecipeEditorChange(event) {
+  const input = event.target;
+  if (input.matches('input[name="recipeImage"]')) {
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const blob = await compressCocktailImage(file);
+      if (state.cocktailRecipes.pendingImageUrl) URL.revokeObjectURL(state.cocktailRecipes.pendingImageUrl);
+      state.cocktailRecipes.pendingImageBlob = blob;
+      state.cocktailRecipes.pendingImageUrl = URL.createObjectURL(blob);
+      const preview = elements.cocktailRecipeEditorContent.querySelector("#cocktailRecipeUploadPreview");
+      if (preview) preview.innerHTML = renderCocktailImage(state.cocktailRecipes.pendingImageUrl, "cocktail-upload-image");
+    } catch {
+      showWorkbuddyMessageModal({ title: "图片无法读取", message: "请选择常见格式的图片文件后重试。" });
+      input.value = "";
+    }
+    return;
+  }
+  if (input.matches("[data-recipe-unit], [data-recipe-abv], [data-recipe-amount]")) updateCocktailRecipeAbvPreview();
+}
+
+async function handleCocktailRecipeEditorSubmit(event) {
+  const form = event.target.closest("[data-cocktail-recipe-form]");
+  if (!form) return;
+  event.preventDefault();
+  if (!form.reportValidity()) return;
+  const formData = new FormData(form);
+  const nameZh = String(formData.get("nameZh") || "").trim();
+  const nameEn = String(formData.get("nameEn") || "").trim();
+  if (!nameZh) {
+    showWorkbuddyMessageModal({ title: "请填写中文标题", message: "中文标题是必填项。" });
+    return;
+  }
+  const existing = state.cocktailRecipes.editingRecipeId
+    ? state.cocktail.recipes.find((recipe) => recipe.id === state.cocktailRecipes.editingRecipeId)
+    : null;
+  if (state.cocktailRecipes.editingRecipeId && !existing) return;
+
+  const ingredientRows = [...form.querySelectorAll("[data-cocktail-ingredient-row]")];
+  if (ingredientRows.length === 0) {
+    showWorkbuddyMessageModal({ title: "请添加材料", message: "配方至少需要选择一项材料。" });
+    elements.cocktailRecipeEditorContent.querySelector('[data-recipe-action="add-ingredient"]')?.focus();
+    return;
+  }
+  const ingredients = [];
+  for (const row of ingredientRows) {
+    const materialId = row.dataset.materialId || "";
+    const material = state.cocktail.materials.find((item) => item.id === materialId) || null;
+    const materialName = material?.nameZh || row.dataset.materialName || "";
+    if (!materialId || !materialName) {
+      showWorkbuddyMessageModal({ title: "请先选择材料", message: "每一行都需要从下拉列表中选择一个已有材料。" });
+      row.querySelector(".cocktail-material-search")?.focus();
+      return;
+    }
+    const abv = Number(row.querySelector("[data-recipe-abv]")?.value || 0);
+    const amount = Number(row.querySelector("[data-recipe-amount]")?.value || 0);
+    const unit = cocktailRecipeUnits.includes(row.querySelector("[data-recipe-unit]")?.value)
+      ? row.querySelector("[data-recipe-unit]").value
+      : "mL";
+    if (!Number.isFinite(abv) || abv < 0 || abv > 100 || !Number.isFinite(amount) || amount < 0) {
+      showWorkbuddyMessageModal({ title: "材料用量不正确", message: "度数需在 0 到 100 之间，用量不能小于 0。" });
+      return;
+    }
+    ingredients.push({
+      id: row.dataset.ingredientId || createId(),
+      materialId,
+      materialName,
+      materialNameEn: material?.nameEn || row.dataset.materialNameEn || "",
+      categoryId: material?.categoryId || row.dataset.categoryId || "other",
+      tagId: material ? material.tagId : row.dataset.tagId || null,
+      abv,
+      amount,
+      unit,
+      note: row.querySelector("[data-recipe-note]")?.value.trim() || "",
+    });
+  }
+
+  const now = new Date().toISOString();
+  const hasNewImage = Boolean(state.cocktailRecipes.pendingImageBlob);
+  const imageId = hasNewImage ? createId() : existing?.imageId || null;
+  const recipe = {
+    ...existing,
+    id: existing?.id || createId(),
+    nameZh,
+    nameEn,
+    introduction: String(formData.get("introduction") || "").trim(),
+    method: String(formData.get("method") || "").trim(),
+    note: String(formData.get("note") || "").trim(),
+    ingredients,
+    imageId,
+    createdAt: existing?.createdAt || now,
+    updatedAt: existing ? now : null,
+  };
+  try {
+    if (hasNewImage) await putCocktailImageRecord(imageId, state.cocktailRecipes.pendingImageBlob);
+    const recipes = existing
+      ? state.cocktail.recipes.map((item) => item.id === recipe.id ? recipe : item)
+      : [recipe, ...state.cocktail.recipes];
+    if (!persistCocktailData({ ...state.cocktail, recipes })) {
+      if (hasNewImage) await deleteCocktailImageRecords([imageId]);
+      return;
+    }
+    if (hasNewImage && state.cocktailRecipes.pendingImageUrl) state.cocktailImageUrls.set(imageId, state.cocktailRecipes.pendingImageUrl);
+    if (hasNewImage && existing?.imageId) {
+      await deleteCocktailImageRecords([existing.imageId]).catch(() => {});
+      const oldUrl = state.cocktailImageUrls.get(existing.imageId);
+      if (oldUrl) URL.revokeObjectURL(oldUrl);
+      state.cocktailImageUrls.delete(existing.imageId);
+    }
+    state.cocktailRecipes.pendingImageBlob = null;
+    state.cocktailRecipes.pendingImageUrl = null;
+    state.cocktailRecipes.recipeId = recipe.id;
+    state.cocktailRecipes.view = existing && state.cocktailRecipes.editorReturnView === "detail" ? "detail" : "list";
+    state.cocktailRecipes.editingRecipeId = null;
+    state.cocktailPage = "recipes";
+    showWorkbuddyToast({ title: existing ? "配方已修改" : "配方已保存" });
+    render();
+  } catch {
+    if (hasNewImage) await deleteCocktailImageRecords([imageId]).catch(() => {});
+    showWorkbuddyMessageModal({ title: "保存失败", message: "配方或图片未能保存，请稍后重试。" });
+  }
+}
+
+async function deleteCocktailRecipe(recipeId) {
+  const recipe = state.cocktail.recipes.find((item) => item.id === recipeId);
+  if (!recipe) return;
+  const shouldDelete = await confirmDangerAction({
+    title: "删除配方",
+    message: `确定删除“${recipe.nameZh}”吗？此操作不能撤销。`,
+    confirmText: "删除配方",
+  });
+  if (!shouldDelete) return;
+  if (!persistCocktailData({ ...state.cocktail, recipes: state.cocktail.recipes.filter((item) => item.id !== recipeId) })) return;
+  if (recipe.imageId && !state.cocktail.materials.some((material) => material.imageId === recipe.imageId)
+      && !state.cocktail.recipes.some((item) => item.imageId === recipe.imageId)) {
+    await deleteCocktailImageRecords([recipe.imageId]).catch(() => {});
+    const url = state.cocktailImageUrls.get(recipe.imageId);
+    if (url) URL.revokeObjectURL(url);
+    state.cocktailImageUrls.delete(recipe.imageId);
+  }
+  state.cocktailRecipes.view = "list";
+  state.cocktailRecipes.recipeId = null;
+  if (state.cocktailRecipes.editingRecipeId === recipeId) state.cocktailRecipes.editingRecipeId = null;
+  render();
+  showWorkbuddyToast({ title: `已删除配方“${recipe.nameZh}”` });
+}
+
+function updateCocktailRecipeAbvPreview() {
+  const root = elements.cocktailRecipeEditorContent;
+  const rows = [...root.querySelectorAll("[data-cocktail-ingredient-row]")].map((row) => ({
+    unit: row.querySelector("[data-recipe-unit]")?.value || "mL",
+    amount: Number(row.querySelector("[data-recipe-amount]")?.value || 0),
+    abv: Number(row.querySelector("[data-recipe-abv]")?.value || 0),
+  }));
+  const preview = root.querySelector("#cocktailRecipeAbvPreview");
+  const warning = root.querySelector("#cocktailRecipeAbvWarning");
+  if (preview) preview.textContent = `${calculateCocktailRecipeAbv(rows).toFixed(1)}%`;
+  if (warning) warning.hidden = !rows.some((row) => row.unit !== "mL" && row.abv > 0);
+}
+
+async function handleCocktailBarClick(event) {
+  const button = event.target.closest("[data-cocktail-action]");
+  if (!button || !elements.cocktailBarContent.contains(button)) return;
+  const action = button.dataset.cocktailAction;
+  if (action === "select-category") {
+    state.cocktailBar.categoryId = button.dataset.categoryId;
+    state.cocktailBar.tagId = "all";
+    render();
+  } else if (action === "select-tag") {
+    state.cocktailBar.tagId = button.dataset.tagId;
+    render();
+  } else if (action === "create-tag") {
+    openCocktailTagDialog({ categoryId: state.cocktailBar.categoryId });
+  } else if (action === "manage-tag") {
+    const tag = state.cocktail.tags.find((item) => item.id === button.dataset.tagId);
+    if (tag) openCocktailTagManagement(tag);
+  } else if (action === "open-material") {
+    state.cocktailBar.returnToRecipeId = null;
+    state.cocktailBar.returnToRecommendationRecipeId = null;
+    state.cocktailBar.materialId = button.dataset.materialId;
+    state.cocktailBar.view = "material-detail";
+    render();
+  } else if (action === "edit-material") {
+    const material = state.cocktail.materials.find((item) => item.id === button.dataset.materialId);
+    if (!material) return;
+    state.cocktailBar.editReturnView = state.cocktailBar.view === "material-detail" ? "material-detail" : "list";
+    state.cocktailBar.materialId = material.id;
+    state.cocktailBar.formCategoryId = material.categoryId;
+    state.cocktailBar.pendingImageBlob = null;
+    state.cocktailBar.pendingImageUrl = null;
+    state.cocktailBar.view = "edit-material";
+    render();
+  } else if (action === "delete-material") {
+    await deleteCocktailMaterial(button.dataset.materialId);
+  } else if (action === "cancel-material-form") {
+    cancelCocktailMaterialForm();
+    render();
+  } else if (action === "back-to-materials") {
+    if (state.cocktailBar.returnToRecommendationRecipeId) {
+      state.cocktailRecommendations.view = "recipe-detail";
+      state.cocktailRecommendations.recipeId = state.cocktailBar.returnToRecommendationRecipeId;
+      state.cocktailBar.returnToRecommendationRecipeId = null;
+      state.cocktailBar.view = "list";
+      state.cocktailBar.materialId = null;
+      state.cocktailPage = "recommendations";
+    } else if (state.cocktailBar.returnToRecipeId) {
+      state.cocktailRecipes.view = "detail";
+      state.cocktailRecipes.recipeId = state.cocktailBar.returnToRecipeId;
+      state.cocktailBar.returnToRecipeId = null;
+      state.cocktailPage = "recipes";
+    } else {
+      state.cocktailBar.view = "list";
+      state.cocktailBar.materialId = null;
+    }
+    render();
+  }
+}
+
+async function handleCocktailBarChange(event) {
+  const input = event.target;
+  if (input.matches('input[name="image"]')) {
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const blob = await compressCocktailImage(file);
+      if (state.cocktailBar.pendingImageUrl) URL.revokeObjectURL(state.cocktailBar.pendingImageUrl);
+      state.cocktailBar.pendingImageBlob = blob;
+      state.cocktailBar.pendingImageUrl = URL.createObjectURL(blob);
+      const preview = elements.cocktailBarContent.querySelector("#cocktailUploadPreview");
+      if (preview) preview.innerHTML = renderCocktailImage(state.cocktailBar.pendingImageUrl, "cocktail-upload-image");
+    } catch {
+      showWorkbuddyMessageModal({ title: "图片无法读取", message: "请选择常见格式的图片文件后重试。" });
+      input.value = "";
+    }
+    return;
+  }
+  if (input.matches('select[name="categoryId"]')) {
+    state.cocktailBar.formCategoryId = input.value;
+    const tagSelect = elements.cocktailBarContent.querySelector('select[name="tagId"]');
+    if (tagSelect) {
+      const tags = state.cocktail.tags.filter((tag) => tag.categoryId === input.value);
+      tagSelect.innerHTML = `<option value="">未分类</option>${tags.map((tag) => `<option value="${escapeHtml(tag.id)}">${escapeHtml(tag.name)}</option>`).join("")}`;
+      tagSelect.value = "";
+    }
+  }
+}
+
+async function handleCocktailBarSubmit(event) {
+  const form = event.target.closest('[data-cocktail-form="material"]');
+  if (!form) return;
+  event.preventDefault();
+  const formData = new FormData(form);
+  const nameZh = String(formData.get("nameZh") || "").trim();
+  const nameEn = String(formData.get("nameEn") || "").trim();
+  if (!nameZh) {
+    showWorkbuddyMessageModal({ title: "请填写中文名称", message: "中文名称是必填项。" });
+    return;
+  }
+  const categoryId = cocktailMaterialCategories.some((category) => category.id === formData.get("categoryId"))
+    ? String(formData.get("categoryId"))
+    : cocktailMaterialCategories[0].id;
+  const requestedTagId = String(formData.get("tagId") || "");
+  const tag = state.cocktail.tags.find((item) => item.id === requestedTagId && item.categoryId === categoryId);
+  const isEditing = form.dataset.materialMode === "edit";
+  const existing = isEditing
+    ? state.cocktail.materials.find((item) => item.id === state.cocktailBar.materialId)
+    : null;
+  if (isEditing && !existing) return;
+  const hasNewImage = Boolean(state.cocktailBar.pendingImageBlob);
+  const imageId = hasNewImage ? createId() : existing?.imageId || null;
+  const now = new Date().toISOString();
+  const material = {
+    ...existing,
+    id: existing?.id || createId(),
+    nameZh,
+    nameEn,
+    categoryId,
+    tagId: tag?.id || null,
+    introduction: String(formData.get("introduction") || "").trim(),
+    imageId,
+    createdAt: existing?.createdAt || now,
+    updatedAt: isEditing ? now : null,
+  };
+  try {
+    if (hasNewImage) await putCocktailImageRecord(imageId, state.cocktailBar.pendingImageBlob);
+    const materials = isEditing
+      ? state.cocktail.materials.map((item) => item.id === material.id ? material : item)
+      : [material, ...state.cocktail.materials];
+    const next = normalizeCocktail({ ...state.cocktail, materials });
+    if (!persistCocktailData(next)) {
+      if (hasNewImage) await deleteCocktailImageRecords([imageId]);
+      return;
+    }
+    if (hasNewImage && state.cocktailBar.pendingImageUrl) state.cocktailImageUrls.set(imageId, state.cocktailBar.pendingImageUrl);
+    if (hasNewImage && existing?.imageId) {
+      try {
+        await deleteCocktailImageRecords([existing.imageId]);
+      } catch {
+        // The saved material already points to the new image; a failed cleanup only leaves an unused local blob.
+      }
+      const previousUrl = state.cocktailImageUrls.get(existing.imageId);
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+      state.cocktailImageUrls.delete(existing.imageId);
+    }
+    state.cocktailBar.pendingImageBlob = null;
+    state.cocktailBar.pendingImageUrl = null;
+    state.module = "cocktail";
+    state.cocktailBar.view = isEditing && state.cocktailBar.editReturnView === "material-detail" ? "material-detail" : "list";
+    state.cocktailBar.categoryId = categoryId;
+    state.cocktailBar.tagId = tag?.id || "unclassified";
+    state.cocktailBar.materialId = state.cocktailBar.view === "material-detail" ? material.id : null;
+    showWorkbuddyToast({ title: isEditing ? "材料已修改" : "材料已保存" });
+    render();
+  } catch {
+    if (hasNewImage) {
+      try {
+        await deleteCocktailImageRecords([imageId]);
+      } catch {
+        // Keep the original material intact if temporary image cleanup also fails.
+      }
+    }
+    showWorkbuddyMessageModal({ title: "保存失败", message: "材料或图片未能保存，请稍后重试。" });
+  }
+}
+
+function cancelCocktailMaterialForm() {
+  const wasEditing = state.cocktailBar.view === "edit-material";
+  if (state.cocktailBar.pendingImageUrl) URL.revokeObjectURL(state.cocktailBar.pendingImageUrl);
+  state.cocktailBar.pendingImageBlob = null;
+  state.cocktailBar.pendingImageUrl = null;
+  state.cocktailBar.view = wasEditing ? state.cocktailBar.editReturnView : "list";
+  if (!wasEditing || state.cocktailBar.view === "list") state.cocktailBar.materialId = null;
+}
+
+function openCocktailTagManagement(tag) {
+  const body = document.createElement("p");
+  body.className = "cocktail-tag-management-copy";
+  body.textContent = `管理“${tag.name}”标签`;
+  const rename = document.createElement("button");
+  rename.className = "secondary-button";
+  rename.type = "button";
+  rename.textContent = "重命名";
+  const remove = document.createElement("button");
+  remove.className = "danger-button";
+  remove.type = "button";
+  remove.textContent = "删除标签";
+  const cancel = document.createElement("button");
+  cancel.className = "cancel-button";
+  cancel.type = "button";
+  cancel.textContent = "关闭";
+  const modal = openWorkbuddyModal({ title: "标签管理", body, actions: [rename, remove, cancel] });
+  cancel.addEventListener("click", modal.close);
+  rename.addEventListener("click", () => {
+    modal.close();
+    openCocktailTagDialog({ categoryId: tag.categoryId, tag });
+  });
+  remove.addEventListener("click", () => {
+    modal.close();
+    deleteCocktailTag(tag.id);
+  });
+}
+
+function openCocktailTagDialog({ categoryId, tag = null }) {
+  const form = document.createElement("form");
+  form.className = "cocktail-tag-form";
+  form.innerHTML = `
+    <label class="cocktail-field">
+      <span>标签名称</span>
+      <input name="name" type="text" maxlength="40" value="${escapeHtml(tag?.name || "")}" required />
+    </label>
+  `;
+  const cancel = document.createElement("button");
+  cancel.className = "cancel-button";
+  cancel.type = "button";
+  cancel.textContent = "取消";
+  const save = document.createElement("button");
+  save.className = "primary-button";
+  save.type = "button";
+  save.textContent = tag ? "保存名称" : "新增标签";
+  const modal = openWorkbuddyModal({
+    title: tag ? "重命名标签" : "新增标签",
+    body: form,
+    actions: [cancel, save],
+    initialFocusSelector: 'input[name="name"]',
+  });
+  cancel.addEventListener("click", modal.close);
+  save.addEventListener("click", () => {
+    if (!form.reportValidity()) return;
+    const enteredName = new FormData(form).get("name");
+    const name = typeof enteredName === "string" ? enteredName.trim() : "";
+    if (!name) return;
+    if (name === "未分类") {
+      showWorkbuddyMessageModal({ title: "标签名称不可用", message: "“未分类”是固定标签，请使用其它名称。" });
+      return;
+    }
+    const duplicate = state.cocktail.tags.some((item) =>
+      item.categoryId === categoryId && item.name.toLocaleLowerCase() === name.toLocaleLowerCase() && item.id !== tag?.id,
+    );
+    if (duplicate) {
+      showWorkbuddyMessageModal({ title: "标签已存在", message: "该一级分类下已有同名标签。" });
+      return;
+    }
+    const tags = tag
+      ? state.cocktail.tags.map((item) => item.id === tag.id ? { ...item, name, updatedAt: new Date().toISOString() } : item)
+      : [{ id: createId(), categoryId, name, createdAt: new Date().toISOString() }, ...state.cocktail.tags];
+    if (!persistCocktailData({ ...state.cocktail, tags })) return;
+    if (!tag) state.cocktailBar.tagId = tags[0].id;
+    modal.close();
+    render();
+  });
+}
+
+async function deleteCocktailTag(tagId) {
+  const tag = state.cocktail.tags.find((item) => item.id === tagId);
+  if (!tag) return false;
+  const count = state.cocktail.materials.filter((material) => material.tagId === tagId).length;
+  const shouldDelete = await confirmDangerAction({
+    title: "删除标签",
+    message: `删除“${tag.name}”后，其中 ${count} 个材料会保留并转入“未分类”。`,
+    confirmText: "删除标签",
+  });
+  if (!shouldDelete) return false;
+  const next = {
+    ...state.cocktail,
+    tags: state.cocktail.tags.filter((item) => item.id !== tagId),
+    materials: state.cocktail.materials.map((material) => material.tagId === tagId ? { ...material, tagId: null } : material),
+  };
+  if (!persistCocktailData(next)) return false;
+  state.cocktailBar.tagId = "unclassified";
+  render();
+  return true;
+}
+
+async function deleteCocktailMaterial(materialId) {
+  const material = state.cocktail.materials.find((item) => item.id === materialId);
+  if (!material) return;
+  const recipeReferenceCount = state.cocktail.recipes.reduce(
+    (count, recipe) => count + recipe.ingredients.filter((ingredient) => ingredient.materialId === material.id).length,
+    0,
+  );
+  const message = recipeReferenceCount
+    ? `删除后，${recipeReferenceCount} 条配方会保留这项材料的名称和分类，但无法再跳转到吧台材料详情。`
+    : `确定删除“${material.nameZh}”吗？此操作不能撤销。`;
+  const shouldDelete = await confirmDangerAction({ title: "删除材料", message, confirmText: "删除材料" });
+  if (!shouldDelete) return;
+  const recipes = state.cocktail.recipes.map((recipe) => ({
+    ...recipe,
+    ingredients: recipe.ingredients.map((ingredient) => ingredient.materialId === material.id
+      ? {
+          ...ingredient,
+          materialName: material.nameZh,
+          materialNameEn: material.nameEn,
+          categoryId: material.categoryId,
+          tagId: material.tagId,
+        }
+      : ingredient),
+  }));
+  const next = {
+    ...state.cocktail,
+    materials: state.cocktail.materials.filter((item) => item.id !== material.id),
+    recipes,
+  };
+  if (!persistCocktailData(next)) return;
+  if (material.imageId) {
+    try {
+      await deleteCocktailImageRecords([material.imageId]);
+    } catch {
+      showWorkbuddyToast({ title: "材料已删除，图片清理稍后重试", tone: "warning" });
+    }
+    const imageUrl = state.cocktailImageUrls.get(material.imageId);
+    if (imageUrl) URL.revokeObjectURL(imageUrl);
+    state.cocktailImageUrls.delete(material.imageId);
+  }
+  if (state.cocktailBar.materialId === material.id) {
+    state.cocktailBar.view = "list";
+    state.cocktailBar.materialId = null;
+  }
+  render();
+  showWorkbuddyToast({ title: `已删除材料“${material.nameZh}”` });
+}
+
+function compressCocktailImage(file) {
+  if (!(file instanceof File) || !file.type.startsWith("image/")) {
+    return Promise.reject(new Error("Unsupported image"));
+  }
+  return new Promise((resolve, reject) => {
+    const sourceUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(sourceUrl);
+      const maxDimension = 1280;
+      const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const context = canvas.getContext("2d");
+      if (!context) {
+        reject(new Error("Canvas unavailable"));
+        return;
+      }
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Image compression failed")), "image/jpeg", 0.9);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(sourceUrl);
+      reject(new Error("Image decode failed"));
+    };
+    image.src = sourceUrl;
+  });
+}
+
+function openSettingsView() {
+  if (state.module !== "settings") state.settingsReturnModule = state.module;
+  state.module = "settings";
+  render();
+}
+
+function renderDesktopSettingsShell() {
+  const shell = document.createElement("section");
+  shell.className = "desktop-settings";
+  shell.innerHTML = `
+    <div class="desktop-settings-header">
+      <button class="icon-button small" type="button" data-action="back" title="返回工作台" aria-label="返回工作台">←</button>
+      <h2>设置</h2>
+    </div>
+    <section class="desktop-settings-group" aria-labelledby="desktopSettingsGeneralHeading">
+      <h3 id="desktopSettingsGeneralHeading">启动与窗口</h3>
+    </section>
+  `;
+  shell.querySelector('[data-action="back"]').addEventListener("click", () => {
+    state.module = state.settingsReturnModule;
+    render();
+  });
+
+  const group = shell.querySelector(".desktop-settings-group");
+  if (!window.workbuddyDesktop) {
+    const note = document.createElement("p");
+    note.className = "desktop-settings-note";
+    note.textContent = "桌面设置仅在 Workbuddy Windows 桌面版中可用。";
+    group.append(note);
+  } else {
+    group.append(
+      createDesktopSettingRow(
+        "minimizeToTray",
+        "关闭窗口时最小化到托盘",
+        "点击窗口右上角关闭按钮时，Workbuddy 保持运行并收进系统托盘。",
+      ),
+      createDesktopSettingRow(
+        "openAtLogin",
+        "开机时启动并最小化到托盘",
+        state.desktopSettings.canSetOpenAtLogin
+          ? "登录 Windows 后自动启动 Workbuddy，窗口保持隐藏，可从托盘打开。"
+          : "安装 Workbuddy 桌面版后可启用此功能。",
+        !state.desktopSettings.canSetOpenAtLogin,
+      ),
+    );
+  }
+  elements.taskList.append(shell);
+}
+
+function createDesktopSettingRow(key, title, description, disabled = false) {
+  const row = document.createElement("label");
+  row.className = "desktop-setting-row";
+  row.innerHTML = `
+    <span class="desktop-setting-copy">
+      <strong>${escapeHtml(title)}</strong>
+      <span>${escapeHtml(description)}</span>
+    </span>
+    <span class="desktop-setting-toggle">
+      <input type="checkbox" data-setting="${escapeHtml(key)}" aria-label="${escapeHtml(title)}"${state.desktopSettings[key] ? " checked" : ""}${disabled ? " disabled" : ""} />
+      <span aria-hidden="true"></span>
+    </span>
+  `;
+  const input = row.querySelector("input");
+  input.addEventListener("change", async () => {
+    const previousValue = state.desktopSettings[key];
+    input.disabled = true;
+    try {
+      state.desktopSettings = await window.workbuddyDesktop.setSetting(key, input.checked);
+      renderList();
+    } catch {
+      input.checked = previousValue;
+      input.disabled = false;
+      showWorkbuddyToast({
+        title: "设置未能保存",
+        message: key === "openAtLogin" ? "请确认 Workbuddy 已安装后再启用开机自启动。" : "请稍后重试。",
+        tone: "warning",
+      });
+    }
+  });
+  return row;
 }
 
 function renderEnglishShell() {
@@ -745,12 +2628,25 @@ function createEnglishSearchPanel() {
   const input = document.createElement("input");
   input.type = "search";
   input.placeholder = "搜索单词、释义或备注";
-  input.value = state.englishSearch;
+  input.value = state.englishSearchDraft ?? state.englishSearch;
+  const searchForm = document.createElement("form");
+  searchForm.className = "english-search-form";
+  searchForm.append(input);
+  const searchButton = document.createElement("button");
+  searchButton.className = "save-button";
+  searchButton.type = "submit";
+  searchButton.textContent = "搜索";
+  searchForm.append(searchButton);
   input.addEventListener("input", () => {
+    state.englishSearchDraft = input.value;
+  });
+  searchForm.addEventListener("submit", (event) => {
+    event.preventDefault();
     state.englishSearch = input.value.trim().toLowerCase();
+    state.englishSearchDraft = input.value;
     renderList();
   });
-  controls.append(input);
+  controls.append(searchForm);
   panel.append(controls);
 
   const keyword = state.englishSearch;
@@ -1235,6 +3131,13 @@ function renderShoppingShell() {
 }
 
 function createShoppingPanel() {
+  if (
+    state.shoppingViewMode === "platform" &&
+    !["all", "unrecorded"].includes(state.shoppingPlatformFilter) &&
+    shoppingPlatformProductCount(state.shoppingPlatformFilter) === 0
+  ) {
+    state.shoppingPlatformFilter = "all";
+  }
   const panel = document.createElement("section");
   panel.className = "shopping-panel";
   const workspace = document.createElement("div");
@@ -1248,7 +3151,10 @@ function createShoppingPanel() {
   if (state.shoppingSearch) {
     productArea.append(createShoppingSearchResults(products));
   } else if (!products.length) {
-    productArea.append(createShoppingEmptyCard("这里暂时没有商品。先新建分类，再添加商品。"));
+    const emptyText = state.shoppingViewMode === "platform"
+      ? state.shoppingPlatformFilter === "unrecorded" ? "没有缺少购买记录的商品。" : "当前平台还没有商品记录。"
+      : "这里暂时没有商品。先新建分类，再添加商品。";
+    productArea.append(createShoppingEmptyCard(emptyText));
   } else {
     const list = document.createElement("div");
     list.className = "shopping-product-list";
@@ -1264,10 +3170,76 @@ function createShoppingPanel() {
 function createShoppingCategorySidebar() {
   const sidebar = document.createElement("aside");
   sidebar.className = "shopping-category-sidebar";
-  sidebar.append(createShoppingCategoryTabs());
-  sidebar.append(createShoppingSubcategoryTabs());
-  sidebar.append(createShoppingTertiaryCategoryTabs());
+  sidebar.append(createShoppingViewModeSwitch());
+  if (state.shoppingViewMode === "platform") {
+    sidebar.append(createShoppingPlatformTabs());
+  } else {
+    sidebar.append(createShoppingCategoryTabs());
+    sidebar.append(createShoppingSubcategoryTabs());
+    sidebar.append(createShoppingTertiaryCategoryTabs());
+  }
   return sidebar;
+}
+
+function createShoppingViewModeSwitch() {
+  const switcher = document.createElement("div");
+  switcher.className = "shopping-view-switch";
+  switcher.setAttribute("role", "group");
+  switcher.setAttribute("aria-label", "商品浏览方式");
+  [
+    ["category", "分类"],
+    ["platform", "平台"],
+  ].forEach(([mode, label]) => {
+    const button = document.createElement("button");
+    button.className = `shopping-view-option${state.shoppingViewMode === mode ? " is-active" : ""}`;
+    button.type = "button";
+    button.textContent = label;
+    button.setAttribute("aria-pressed", String(state.shoppingViewMode === mode));
+    button.addEventListener("click", () => {
+      if (state.shoppingViewMode === mode) return;
+      state.shoppingViewMode = mode;
+      state.shoppingExpandedProductId = null;
+      state.shoppingHighlightedProductId = null;
+      state.shoppingAddingRecordProductId = null;
+      state.shoppingEditingRecordId = null;
+      render();
+    });
+    switcher.append(button);
+  });
+  return switcher;
+}
+
+function createShoppingPlatformTabs() {
+  const section = document.createElement("div");
+  section.className = "shopping-category-section shopping-platform-section";
+  const heading = document.createElement("div");
+  heading.className = "shopping-category-heading";
+  heading.textContent = "购买平台";
+  const tabs = document.createElement("div");
+  tabs.className = "shopping-tabs";
+  tabs.append(createShoppingTab("全部商品", state.shopping.products.length, state.shoppingPlatformFilter === "all", () => {
+    selectShoppingPlatformFilter("all");
+  }));
+  shoppingPlatformsInUse().forEach((platform) => {
+    tabs.append(createShoppingTab(platform, shoppingPlatformProductCount(platform), state.shoppingPlatformFilter === platform, () => {
+      selectShoppingPlatformFilter(platform);
+    }));
+  });
+  tabs.append(createShoppingTab("未记录平台", shoppingUnrecordedProductCount(), state.shoppingPlatformFilter === "unrecorded", () => {
+    selectShoppingPlatformFilter("unrecorded");
+  }));
+  section.append(heading, tabs);
+  return section;
+}
+
+function selectShoppingPlatformFilter(filter) {
+  if (state.shoppingPlatformFilter === filter) return;
+  state.shoppingPlatformFilter = filter;
+  state.shoppingExpandedProductId = null;
+  state.shoppingHighlightedProductId = null;
+  state.shoppingAddingRecordProductId = null;
+  state.shoppingEditingRecordId = null;
+  render();
 }
 
 function createShoppingCategoryTabs() {
@@ -1478,7 +3450,10 @@ function createShoppingControls() {
   const controls = document.createElement("div");
   controls.className = "shopping-list-toolbar";
   controls.innerHTML = `
-    <input type="search" placeholder="搜索商品、本次名称、平台、链接或备注" value="${escapeHtml(state.shoppingSearch)}" />
+    <form class="shopping-search-form">
+      <input name="keyword" type="search" placeholder="搜索商品、本次名称、平台、链接或备注" value="${escapeHtml(state.shoppingSearchDraft ?? state.shoppingSearch)}" />
+      <button class="save-button" type="submit">搜索</button>
+    </form>
     <label class="select-field">
       <span>排序</span>
       <select aria-label="商品排序">
@@ -1488,8 +3463,14 @@ function createShoppingControls() {
     </label>
     <button class="save-button" type="button" data-action="export-shopping">导出</button>
   `;
-  controls.querySelector('input[type="search"]').addEventListener("input", (event) => {
-    state.shoppingSearch = event.target.value.trim();
+  const searchForm = controls.querySelector(".shopping-search-form");
+  searchForm.querySelector('input[type="search"]').addEventListener("input", (event) => {
+    state.shoppingSearchDraft = event.target.value;
+  });
+  searchForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    state.shoppingSearch = searchForm.elements.keyword.value.trim();
+    state.shoppingSearchDraft = searchForm.elements.keyword.value;
     state.shoppingHighlightedProductId = null;
     renderList();
   });
@@ -1594,7 +3575,7 @@ function createShoppingSearchRow(product) {
   row.innerHTML = `
     <strong>${escapeHtml(product.name)}</strong>
     <span>${escapeHtml(shoppingProductPath(product))}</span>
-    <span>${escapeHtml(shoppingBestPriceText(product))}</span>
+    <span>${escapeHtml(shoppingBestPriceText(product, shoppingVisibleRecordsForProduct(product)))}</span>
   `;
   row.addEventListener("click", () => {
     state.shoppingCategoryId = product.categoryId;
@@ -1605,6 +3586,7 @@ function createShoppingSearchRow(product) {
     state.shoppingAddingRecordProductId = null;
     state.shoppingEditingRecordId = null;
     state.shoppingSearch = "";
+    state.shoppingSearchDraft = "";
     render();
   });
   return row;
@@ -1615,17 +3597,18 @@ function createShoppingProductCard(product) {
   const highlighted = state.shoppingHighlightedProductId === product.id;
   const renaming = state.shoppingRenamingProductId === product.id;
   const editingUnit = state.shoppingEditingUnitProductId === product.id;
+  const visibleRecords = shoppingVisibleRecordsForProduct(product);
   const card = document.createElement("article");
   card.className = `shopping-product-card${expanded ? " is-expanded" : ""}${highlighted ? " is-highlighted" : ""}`;
   card.innerHTML = `
     <div class="shopping-product-head">
       <div class="task-body">
         ${renaming ? shoppingProductRenameFormHtml(product) : `<h3>${escapeHtml(product.name)}</h3>`}
-        <div class="task-meta">${escapeHtml(shoppingBestPriceText(product))}</div>
+        <div class="task-meta">${escapeHtml(shoppingBestPriceText(product, visibleRecords))}</div>
         ${editingUnit ? shoppingUnitInlineFormHtml(product) : shoppingProductMetaHtml(product)}
       </div>
       <div class="task-actions">
-        ${renaming ? "" : state.shoppingSort === "custom" && !state.shoppingSearch ? dragHandleHtml() : ""}
+        ${renaming ? "" : canReorderShoppingView() ? dragHandleHtml() : ""}
         <button class="icon-button small expand-button${expanded ? " is-expanded" : ""}" type="button" data-action="expand" title="${expanded ? "收起" : "展开"}" aria-label="${expanded ? "收起" : "展开"}">▸</button>
         ${renaming ? "" : '<button class="icon-button small" type="button" data-action="rename" title="修改商品名" aria-label="修改商品名">✎</button>'}
         ${renaming ? "" : '<button class="icon-button small" type="button" data-action="delete" title="删除商品" aria-label="删除商品">×</button>'}
@@ -1742,12 +3725,13 @@ function createShoppingProductDetail(product) {
 function createShoppingRecordSection(product) {
   const section = document.createElement("section");
   section.className = "shopping-record-section";
+  const visibleRecords = shoppingVisibleRecordsForProduct(product);
   const adding = state.shoppingAddingRecordProductId === product.id;
   section.innerHTML = `
     <div class="shopping-record-section-head">
       <div>
         <div class="shopping-detail-heading">购买记录</div>
-        <div class="task-meta">${product.records.length} 条记录</div>
+        <div class="task-meta">${visibleRecords.length} 条记录</div>
       </div>
       ${adding ? "" : '<button class="save-button" type="button" data-action="add-record">新增购买记录</button>'}
     </div>
@@ -1758,16 +3742,20 @@ function createShoppingRecordSection(product) {
     renderList();
   });
   if (adding) section.append(createShoppingRecordEditor(product));
-  section.append(createShoppingRecordList(product));
+  section.append(createShoppingRecordList(product, visibleRecords));
   return section;
 }
 
 function createShoppingRecordEditor(product, record = null) {
   const form = document.createElement("form");
   const editing = Boolean(record);
-  const date = record?.date || state.selectedDate;
+  const date = record ? record.date || "" : state.selectedDate;
   const name = record ? shoppingRecordName(product, record) : "";
-  const platform = record?.platform || shoppingPlatforms[0];
+  const platform = record?.platform || (
+    state.shoppingViewMode === "platform" && shoppingPlatforms.includes(state.shoppingPlatformFilter)
+      ? state.shoppingPlatformFilter
+      : shoppingPlatforms[0]
+  );
   const totalPrice = record ? formatMoney(record.totalPrice) : "";
   const packaging = normalizeShoppingPackaging(record?.packaging) || {
     packageUnit: "",
@@ -1782,7 +3770,7 @@ function createShoppingRecordEditor(product, record = null) {
   form.className = "shopping-record-form shopping-record-editor";
   form.innerHTML = `
     <div class="shopping-record-editor-basic">
-      <input name="date" type="date" value="${escapeHtml(date)}" required />
+      <input name="date" type="date" value="${escapeHtml(date)}" />
       <input name="name" type="text" maxlength="80" placeholder="商品标题" value="${escapeHtml(name)}" required />
     </div>
     <div class="shopping-record-editor-commerce">
@@ -1852,8 +3840,8 @@ function createShoppingRecordEditor(product, record = null) {
     });
     const platform = form.elements.platform.value.trim();
     const name = form.elements.name.value.trim();
-    const date = form.elements.date.value || state.selectedDate;
-    if (!isISODate(date) || !name || !shoppingPlatforms.includes(platform)) return;
+    const date = form.elements.date.value;
+    if ((date && !isISODate(date)) || !name || !shoppingPlatforms.includes(platform)) return;
     const updates = {
       date,
       name,
@@ -1881,14 +3869,14 @@ function createShoppingRecordEditor(product, record = null) {
   return form;
 }
 
-function createShoppingRecordList(product) {
+function createShoppingRecordList(product, records = shoppingVisibleRecordsForProduct(product)) {
   const list = document.createElement("div");
   list.className = "shopping-record-list";
-  if (!product.records.length) {
+  if (!records.length) {
     list.append(createShoppingEmptyCard("还没有购买记录。"));
     return list;
   }
-  sortedShoppingRecords(product).forEach((record) => list.append(createShoppingRecordRow(product, record)));
+  sortedShoppingRecords(product, records).forEach((record) => list.append(createShoppingRecordRow(product, record)));
   return list;
 }
 
@@ -1909,7 +3897,7 @@ function createShoppingRecordRow(product, record) {
   const packagingText = shoppingPackagingText(record.packaging);
   row.innerHTML = `
     <div>
-      <strong>${escapeHtml(formatTaskDate(record.date))} · ${escapeHtml(recordName)} · ${escapeHtml(record.platform)}</strong>
+      <strong>${record.date ? `${escapeHtml(formatTaskDate(record.date))} · ` : ""}${escapeHtml(recordName)} · ${escapeHtml(record.platform)}</strong>
       <span class="shopping-record-price">总价 ${totalText} · 购买包装数 ${purchaseCountText} · 单价 ${escapeHtml(priceText)}</span>
       ${packagingText ? `<span class="shopping-record-packaging">包装：${escapeHtml(packagingText)}</span>` : ""}
       ${purchaseLink ? `<span class="shopping-record-link"><span>购买链接：${escapeHtml(purchaseLink)}</span><button class="cancel-button shopping-copy-button" type="button" data-action="copy-link">复制</button></span>` : ""}
@@ -2152,7 +4140,13 @@ function collectShoppingExportSelection(container) {
 }
 
 function shoppingProductsForExport(scope, selection) {
-  if (scope === "current") return shoppingVisibleProducts();
+  if (scope === "current") {
+    const products = shoppingVisibleProducts();
+    if (state.shoppingViewMode !== "platform" || state.shoppingPlatformFilter === "all" || state.shoppingPlatformFilter === "unrecorded") {
+      return products;
+    }
+    return products.map((product) => ({ ...product, records: shoppingVisibleRecordsForProduct(product) }));
+  }
   if (scope !== "custom") return sortShoppingProducts(state.shopping.products);
   const products = state.shopping.products.filter((product) => {
     if (selection.categories.has(product.categoryId)) return true;
@@ -2168,6 +4162,12 @@ function shoppingProductsForExport(scope, selection) {
 function shoppingExportScopeLabel(scope, container) {
   if (scope === "all") return "全部商品";
   if (scope === "current") {
+    if (state.shoppingViewMode === "platform") {
+      const platform = state.shoppingPlatformFilter === "all"
+        ? "全部商品"
+        : state.shoppingPlatformFilter === "unrecorded" ? "未记录平台" : state.shoppingPlatformFilter;
+      return `当前视图：${platform}${state.shoppingSearch ? `；搜索：${state.shoppingSearch}` : ""}`;
+    }
     if (state.shoppingSearch) return `当前搜索：${state.shoppingSearch}`;
     if (state.shoppingCategoryId === "all") return "当前视图：全部商品";
     const category = shoppingCategoryById(state.shoppingCategoryId)?.name || "未知一级分类";
@@ -2263,7 +4263,10 @@ function createKnowledgeCategoriesPanel() {
   controls.className = "knowledge-controls";
   controls.innerHTML = `
     ${batchActive ? "" : '<button class="primary-button" type="button" data-action="new-category">新建分类</button>'}
-    <input type="search" placeholder="搜索文档" value="${escapeHtml(state.knowledgeSearch)}" />
+    <form class="knowledge-search-form">
+      <input name="keyword" type="search" placeholder="搜索文档" value="${escapeHtml(state.knowledgeSearchDraft ?? state.knowledgeSearch)}" />
+      <button class="save-button" type="submit">搜索</button>
+    </form>
     <label class="select-field">
       <span>分类排序</span>
       <select data-sort="category" aria-label="分类排序">
@@ -2287,8 +4290,14 @@ function createKnowledgeCategoriesPanel() {
     state.knowledgeCreatingCategoryParentId = null;
     render();
   });
-  controls.querySelector('input[type="search"]').addEventListener("input", (event) => {
-    state.knowledgeSearch = event.target.value.trim();
+  const searchForm = controls.querySelector(".knowledge-search-form");
+  searchForm.querySelector('input[type="search"]').addEventListener("input", (event) => {
+    state.knowledgeSearchDraft = event.target.value;
+  });
+  searchForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    state.knowledgeSearch = searchForm.elements.keyword.value.trim();
+    state.knowledgeSearchDraft = searchForm.elements.keyword.value;
     renderList();
   });
   controls.querySelector('[data-sort="category"]').addEventListener("change", (event) => {
@@ -4098,6 +6107,7 @@ function importKnowledgeZipDocuments(parsed, options) {
   importedCategoryIds.forEach((id) => state.expandedKnowledgeCategories.add(id));
   state.knowledgeView = "categories";
   state.knowledgeSearch = "";
+  state.knowledgeSearchDraft = "";
   saveKnowledge();
   render();
   showWorkbuddyToast({
@@ -6527,7 +8537,7 @@ function canReorderKnowledgeView() {
 }
 
 function canReorderShoppingView() {
-  return state.module === "shopping" && state.shoppingSort === "custom" && !state.shoppingSearch;
+  return state.module === "shopping" && state.shoppingViewMode === "category" && state.shoppingSort === "custom" && !state.shoppingSearch;
 }
 
 function createPlannerDragHandle(element, entry) {
@@ -7207,6 +9217,11 @@ function addShoppingProduct(data) {
   state.shoppingCategoryId = data.categoryId;
   state.shoppingSubcategoryId = data.subcategoryId || "all";
   state.shoppingTertiaryCategoryId = data.tertiaryCategoryId || "all";
+  if (state.shoppingViewMode === "platform") {
+    state.shoppingPlatformFilter = "unrecorded";
+    state.shoppingSearch = "";
+    state.shoppingSearchDraft = "";
+  }
   state.shoppingExpandedProductId = id;
   state.shoppingAddingRecordProductId = null;
   state.shoppingEditingRecordId = null;
@@ -7287,6 +9302,7 @@ function addShoppingRecord(productId, record) {
   });
   state.shoppingAddingRecordProductId = null;
   state.shoppingEditingRecordId = null;
+  if (state.shoppingViewMode === "platform") state.shoppingPlatformFilter = record.platform;
   saveShopping();
   render();
 }
@@ -7327,6 +9343,7 @@ function updateShoppingRecord(productId, recordId, updates) {
   });
   state.shoppingAddingRecordProductId = null;
   state.shoppingEditingRecordId = null;
+  if (state.shoppingViewMode === "platform") state.shoppingPlatformFilter = updates.platform;
   saveShopping();
   render();
 }
@@ -7578,6 +9595,21 @@ function shoppingPlatformOptions(selected = "") {
     .join("");
 }
 
+function shoppingPlatformsInUse() {
+  const platforms = new Set(state.shopping.products.flatMap((product) => product.records.map((record) => record.platform).filter(Boolean)));
+  const knownPlatforms = shoppingPlatforms.filter((platform) => platforms.has(platform));
+  knownPlatforms.forEach((platform) => platforms.delete(platform));
+  return [...knownPlatforms, ...[...platforms].sort((a, b) => a.localeCompare(b, "zh-CN"))];
+}
+
+function shoppingPlatformProductCount(platform) {
+  return state.shopping.products.filter((product) => product.records.some((record) => record.platform === platform)).length;
+}
+
+function shoppingUnrecordedProductCount() {
+  return state.shopping.products.filter((product) => !product.records.length).length;
+}
+
 function shoppingCategoryProductCount(categoryId) {
   return state.shopping.products.filter((product) => product.categoryId === categoryId).length;
 }
@@ -7605,7 +9637,16 @@ function shoppingTertiaryCategoriesFor(subcategoryId) {
 function shoppingVisibleProducts() {
   const keyword = state.shoppingSearch.trim().toLowerCase();
   let products = state.shopping.products;
-  if (keyword) {
+  if (state.shoppingViewMode === "platform") {
+    if (state.shoppingPlatformFilter === "unrecorded") {
+      products = products.filter((product) => !product.records.length);
+    } else if (state.shoppingPlatformFilter !== "all") {
+      products = products.filter((product) => product.records.some((record) => record.platform === state.shoppingPlatformFilter));
+    }
+    if (keyword) {
+      products = products.filter((product) => shoppingProductMatches(product, keyword, shoppingVisibleRecordsForProduct(product)));
+    }
+  } else if (keyword) {
     products = products.filter((product) => shoppingProductMatches(product, keyword));
   } else {
     if (state.shoppingCategoryId !== "all") {
@@ -7621,14 +9662,21 @@ function shoppingVisibleProducts() {
   return sortShoppingProducts(products);
 }
 
+function shoppingVisibleRecordsForProduct(product) {
+  if (state.shoppingViewMode !== "platform" || ["all", "unrecorded"].includes(state.shoppingPlatformFilter)) {
+    return product.records;
+  }
+  return product.records.filter((record) => record.platform === state.shoppingPlatformFilter);
+}
+
 function sortShoppingProducts(products) {
   const sorted = [...products];
   if (state.shoppingSort === "name") return sorted.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
   return sorted.sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name, "zh-CN"));
 }
 
-function shoppingProductMatches(product, keyword) {
-  const recordText = product.records
+function shoppingProductMatches(product, keyword, records = product.records) {
+  const recordText = records
     .map((record) => `${record.name || ""} ${record.platform} ${record.purchaseLink || ""} ${record.note || ""} ${shoppingPackagingText(record.packaging)}`)
     .join(" ");
   const path = shoppingProductPath(product);
@@ -7642,15 +9690,15 @@ function shoppingProductPath(product) {
   return [category, subcategory, tertiaryCategory].filter(Boolean).join(" > ");
 }
 
-function shoppingBestPriceText(product) {
-  const best = shoppingBestRecord(product);
+function shoppingBestPriceText(product, records = product.records) {
+  const best = shoppingBestRecord(product, records);
   if (!best) return "暂无价格记录";
   const unit = best.details.primaryUnit ? `/${best.details.primaryUnit}` : "";
   return `最低：${best.record.platform} ${formatUnitPrice(best.details.primaryPrice)} 元${unit}`;
 }
 
-function shoppingBestRecord(product) {
-  return product.records
+function shoppingBestRecord(product, records = product.records) {
+  return records
     .map((record) => ({ record, details: shoppingRecordPriceDetails(product, record) }))
     .filter((item) => Number.isFinite(item.details.primaryPrice))
     .sort((a, b) => a.details.primaryPrice - b.details.primaryPrice || a.record.date.localeCompare(b.record.date))[0] || null;
@@ -7827,8 +9875,8 @@ async function copyShoppingRecordLink(value) {
   }
 }
 
-function sortedShoppingRecords(product) {
-  return [...product.records].sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || "").localeCompare(a.createdAt || ""));
+function sortedShoppingRecords(product, records = product.records) {
+  return [...records].sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || "").localeCompare(a.createdAt || ""));
 }
 
 function shoppingCategoryById(id) {
@@ -8279,6 +10327,16 @@ function resetBirthdayForm() {
 async function exportTasks() {
   const exportedAt = new Date();
   const filename = `Workbuddy-${formatFileStamp(exportedAt)}.json`;
+  let cocktailBackup;
+  try {
+    cocktailBackup = await createCocktailBackupPackage();
+  } catch {
+    showWorkbuddyMessageModal({
+      title: "导出失败",
+      message: "调酒笔记图片未能读取，备份文件没有生成。请稍后重试。",
+    });
+    return;
+  }
   const blob = new Blob(
     [
       JSON.stringify(
@@ -8290,6 +10348,7 @@ async function exportTasks() {
           english: state.english,
           knowledge: state.knowledge,
           shopping: state.shopping,
+          cocktail: cocktailBackup,
         },
         null,
         2,
@@ -8363,7 +10422,7 @@ async function importTasks(event) {
 
   const shouldImport = await confirmDangerAction({
     title: "导入备份",
-    message: "导入备份会覆盖当前任务、生日、周期、英语学习、知识文库和商品比价数据。建议先确认当前数据已经导出到坚果云。",
+    message: "导入备份会覆盖当前任务、生日、周期、英语、知识文库和商品比价数据；备份中若包含调酒笔记，也会覆盖当前调酒笔记。旧备份没有调酒笔记内容时，会保留现有数据。建议先确认当前数据已经导出到坚果云。",
     confirmText: "导入",
   });
   if (!shouldImport) {
@@ -8372,11 +10431,18 @@ async function importTasks(event) {
   }
 
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
     try {
       const parsed = JSON.parse(String(reader.result));
       if (!Array.isArray(parsed.tasks)) throw new Error("Invalid file");
-      saveImportBackup();
+      const importedCocktail = parsed.cocktail ? await prepareCocktailImport(parsed.cocktail) : null;
+      await saveImportBackup();
+      if (importedCocktail) {
+        await storeImportedCocktailImages(importedCocktail);
+        state.cocktail = importedCocktail.cocktail;
+        localStorage.setItem(cocktailStorageKey, JSON.stringify(state.cocktail));
+        await hydrateCocktailImageUrls();
+      }
       state.tasks = normalizeTasks(parsed.tasks).filter((task) => task.title && typeof task.title === "string");
       state.birthdays = normalizeBirthdays(parsed.birthdays);
       state.recurrences = parsed.recurrences ? normalizeRecurrences(parsed.recurrences) : state.recurrences;
@@ -8406,10 +10472,13 @@ async function importTasks(event) {
   reader.readAsText(file);
 }
 
-function saveImportBackup() {
-  localStorage.setItem(
-    importBackupKey,
-    JSON.stringify({
+async function saveImportBackup() {
+  const backupId = createId();
+  await saveCocktailImageSnapshot(backupId);
+  const previousRaw = localStorage.getItem(importBackupKey);
+  const previousBackupId = previousRaw ? JSON.parse(previousRaw).cocktailImageBackupId : null;
+  try {
+    localStorage.setItem(importBackupKey, JSON.stringify({
       savedAt: new Date().toISOString(),
       tasks: state.tasks,
       birthdays: state.birthdays,
@@ -8417,8 +10486,14 @@ function saveImportBackup() {
       english: state.english,
       knowledge: state.knowledge,
       shopping: state.shopping,
-    }),
-  );
+      cocktail: state.cocktail,
+      cocktailImageBackupId: backupId,
+    }));
+  } catch (error) {
+    await deleteCocktailImageSnapshot(backupId);
+    throw error;
+  }
+  if (previousBackupId) await deleteCocktailImageSnapshot(previousBackupId);
 }
 
 async function restoreImportBackup() {
@@ -8426,7 +10501,7 @@ async function restoreImportBackup() {
   if (!raw) return;
   const shouldRestore = await confirmDangerAction({
     title: "恢复数据",
-    message: "这会用最近一次导入前的本机数据覆盖当前任务、生日、周期、英语学习、知识文库和商品比价数据。",
+    message: "这会用最近一次导入前的本机数据覆盖当前任务、生日、周期、英语学习、知识文库、商品比价和调酒笔记数据。",
     confirmText: "恢复",
   });
   if (!shouldRestore) return;
@@ -8434,6 +10509,16 @@ async function restoreImportBackup() {
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed.tasks)) throw new Error("Invalid backup");
+    if (parsed.cocktail) {
+      const cocktailPackage = Array.isArray(parsed.cocktail.recommendationPlaylists)
+        ? parsed.cocktail
+        : { ...parsed.cocktail, recommendationPlaylists: state.cocktail.recommendationPlaylists };
+      const cocktail = normalizeCocktail(cocktailPackage);
+      if (parsed.cocktailImageBackupId) await restoreCocktailImageSnapshot(cocktail, parsed.cocktailImageBackupId);
+      state.cocktail = cocktail;
+      localStorage.setItem(cocktailStorageKey, JSON.stringify(state.cocktail));
+      await hydrateCocktailImageUrls();
+    }
     state.tasks = normalizeTasks(parsed.tasks).filter((task) => task.title && typeof task.title === "string");
     state.birthdays = normalizeBirthdays(parsed.birthdays);
     state.recurrences = parsed.recurrences ? normalizeRecurrences(parsed.recurrences) : state.recurrences;
@@ -8550,6 +10635,358 @@ function loadShopping() {
   } catch {
     return normalizeShopping();
   }
+}
+
+function loadCocktail() {
+  try {
+    const raw = localStorage.getItem(cocktailStorageKey);
+    return raw ? normalizeCocktail(JSON.parse(raw)) : normalizeCocktail();
+  } catch {
+    return normalizeCocktail();
+  }
+}
+
+function normalizeCocktail(cocktail = {}) {
+  const categoryIds = new Set(cocktailMaterialCategories.map((category) => category.id));
+  const tags = [];
+  const tagIds = new Set();
+  const tagNames = new Set();
+  (Array.isArray(cocktail.tags) ? cocktail.tags : []).forEach((tag) => {
+    if (!tag || typeof tag.name !== "string" || !tag.name.trim() || tag.name.trim() === "未分类") return;
+    if (!categoryIds.has(tag.categoryId)) return;
+    const id = typeof tag.id === "string" && tag.id ? tag.id : createId();
+    const normalizedName = tag.name.trim();
+    const uniqueName = `${tag.categoryId}:${normalizedName.toLocaleLowerCase()}`;
+    if (tagIds.has(id) || tagNames.has(uniqueName)) return;
+    tagIds.add(id);
+    tagNames.add(uniqueName);
+    tags.push({
+      id,
+      categoryId: tag.categoryId,
+      name: normalizedName,
+      createdAt: tag.createdAt || new Date().toISOString(),
+      updatedAt: tag.updatedAt || null,
+    });
+  });
+
+  const tagById = new Map(tags.map((tag) => [tag.id, tag]));
+  const materials = [];
+  const materialIds = new Set();
+  (Array.isArray(cocktail.materials) ? cocktail.materials : []).forEach((material) => {
+    if (!material || typeof material.nameZh !== "string" || !material.nameZh.trim()) return;
+    const id = typeof material.id === "string" && material.id ? material.id : createId();
+    if (materialIds.has(id)) return;
+    materialIds.add(id);
+    const categoryId = categoryIds.has(material.categoryId) ? material.categoryId : cocktailMaterialCategories[0].id;
+    const referencedTag = tagById.get(material.tagId);
+    materials.push({
+      id,
+      nameZh: material.nameZh.trim(),
+      nameEn: typeof material.nameEn === "string" ? material.nameEn.trim() : "",
+      categoryId,
+      tagId: referencedTag?.categoryId === categoryId ? referencedTag.id : null,
+      introduction: typeof material.introduction === "string" ? material.introduction : "",
+      imageId: typeof material.imageId === "string" && material.imageId ? material.imageId : null,
+      createdAt: material.createdAt || new Date().toISOString(),
+      updatedAt: material.updatedAt || null,
+    });
+  });
+
+  const materialById = new Map(materials.map((material) => [material.id, material]));
+  const recipes = [];
+  const recipeIds = new Set();
+  (Array.isArray(cocktail.recipes) ? cocktail.recipes : []).forEach((recipe) => {
+    if (!recipe || typeof recipe.nameZh !== "string" || !recipe.nameZh.trim()) return;
+    const id = typeof recipe.id === "string" && recipe.id ? recipe.id : createId();
+    if (recipeIds.has(id)) return;
+    recipeIds.add(id);
+    const ingredients = (Array.isArray(recipe.ingredients) ? recipe.ingredients : []).flatMap((ingredient) => {
+      if (!ingredient || typeof ingredient !== "object") return [];
+      const materialId = typeof ingredient.materialId === "string" && ingredient.materialId ? ingredient.materialId : "";
+      const material = materialById.get(materialId) || null;
+      const categoryId = material?.categoryId
+        || (categoryIds.has(ingredient.categoryId) ? ingredient.categoryId : "other");
+      const referencedTag = material ? tagById.get(material.tagId) : tagById.get(ingredient.tagId);
+      const amount = Number(ingredient.amount);
+      const abv = Number(ingredient.abv);
+      return [{
+        id: typeof ingredient.id === "string" && ingredient.id ? ingredient.id : createId(),
+        materialId,
+        materialName: material?.nameZh || (typeof ingredient.materialName === "string" ? ingredient.materialName.trim() : ""),
+        materialNameEn: material?.nameEn || (typeof ingredient.materialNameEn === "string" ? ingredient.materialNameEn.trim() : ""),
+        categoryId,
+        tagId: referencedTag?.categoryId === categoryId ? referencedTag.id : null,
+        abv: Number.isFinite(abv) ? Math.min(100, Math.max(0, abv)) : 0,
+        amount: Number.isFinite(amount) ? Math.max(0, amount) : 0,
+        unit: cocktailRecipeUnits.includes(ingredient.unit) ? ingredient.unit : "mL",
+        note: typeof ingredient.note === "string" ? ingredient.note : "",
+      }];
+    });
+    recipes.push({
+      id,
+      nameZh: recipe.nameZh.trim(),
+      nameEn: typeof recipe.nameEn === "string" ? recipe.nameEn.trim() : "",
+      introduction: typeof recipe.introduction === "string" ? recipe.introduction : "",
+      method: typeof recipe.method === "string" ? recipe.method : "",
+      note: typeof recipe.note === "string" ? recipe.note : "",
+      ingredients,
+      imageId: typeof recipe.imageId === "string" && recipe.imageId ? recipe.imageId : null,
+      createdAt: recipe.createdAt || new Date().toISOString(),
+      updatedAt: recipe.updatedAt || null,
+    });
+  });
+
+  const validRecipeIds = new Set(recipes.map((recipe) => recipe.id));
+  const recommendationCategoryIds = new Set(cocktailRecommendationCategories.map((category) => category.id));
+  const recommendationPlaylists = [];
+  const recommendationPlaylistIds = new Set();
+  const recommendationPlaylistNames = new Set();
+  const featuredCategoryIds = new Set();
+  (Array.isArray(cocktail.recommendationPlaylists) ? cocktail.recommendationPlaylists : []).forEach((playlist) => {
+    if (!playlist || !recommendationCategoryIds.has(playlist.categoryId) || typeof playlist.name !== "string" || !playlist.name.trim()) return;
+    const id = typeof playlist.id === "string" && playlist.id ? playlist.id : createId();
+    if (recommendationPlaylistIds.has(id)) return;
+    const name = playlist.name.trim();
+    const uniqueName = `${playlist.categoryId}:${name.toLocaleLowerCase()}`;
+    if (recommendationPlaylistNames.has(uniqueName)) return;
+    recommendationPlaylistIds.add(id);
+    recommendationPlaylistNames.add(uniqueName);
+    let isHome = Boolean(playlist.isHome) && playlist.categoryId !== "season" && !featuredCategoryIds.has(playlist.categoryId);
+    if (isHome) featuredCategoryIds.add(playlist.categoryId);
+    const recipeIds = [...new Set((Array.isArray(playlist.recipeIds) ? playlist.recipeIds : [])
+      .filter((recipeId) => typeof recipeId === "string" && validRecipeIds.has(recipeId)))];
+    recommendationPlaylists.push({
+      id,
+      categoryId: playlist.categoryId,
+      name,
+      recipeIds,
+      isHome,
+      createdAt: playlist.createdAt || new Date().toISOString(),
+      updatedAt: playlist.updatedAt || null,
+    });
+  });
+  return { tags, materials, recipes, recommendationPlaylists };
+}
+
+function persistCocktailData(cocktail) {
+  const normalized = normalizeCocktail(cocktail);
+  try {
+    localStorage.setItem(cocktailStorageKey, JSON.stringify(normalized));
+    state.cocktail = normalized;
+    return true;
+  } catch {
+    showWorkbuddyMessageModal({
+      title: "保存失败",
+      message: "浏览器本地空间不足，调酒笔记数据没有保存。请先导出备份，再重试。",
+    });
+    return false;
+  }
+}
+
+function openCocktailImageDatabase() {
+  if (!("indexedDB" in window)) return Promise.reject(new Error("IndexedDB unavailable"));
+  if (!cocktailImageDatabasePromise) {
+    cocktailImageDatabasePromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open(cocktailImageDatabaseName, 1);
+      request.onupgradeneeded = () => {
+        const database = request.result;
+        if (!database.objectStoreNames.contains(cocktailImageStoreName)) {
+          database.createObjectStore(cocktailImageStoreName, { keyPath: "id" });
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error("Image database failed"));
+      request.onblocked = () => reject(new Error("Image database is blocked"));
+    });
+  }
+  return cocktailImageDatabasePromise;
+}
+
+async function getCocktailImageRecords() {
+  const database = await openCocktailImageDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(cocktailImageStoreName, "readonly");
+    const request = transaction.objectStore(cocktailImageStoreName).getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error || new Error("Image read failed"));
+    transaction.onabort = () => reject(transaction.error || new Error("Image read aborted"));
+  });
+}
+
+async function getCocktailImageBlob(id) {
+  if (!id) return null;
+  const database = await openCocktailImageDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(cocktailImageStoreName, "readonly");
+    const request = transaction.objectStore(cocktailImageStoreName).get(id);
+    request.onsuccess = () => resolve(request.result?.blob || null);
+    request.onerror = () => reject(request.error || new Error("Image read failed"));
+    transaction.onabort = () => reject(transaction.error || new Error("Image read aborted"));
+  });
+}
+
+async function writeCocktailImageRecords(records = [], deleteIds = []) {
+  const database = await openCocktailImageDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(cocktailImageStoreName, "readwrite");
+    const store = transaction.objectStore(cocktailImageStoreName);
+    deleteIds.forEach((id) => store.delete(id));
+    records.forEach((record) => store.put(record));
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error("Image write failed"));
+    transaction.onabort = () => reject(transaction.error || new Error("Image write aborted"));
+  });
+}
+
+async function putCocktailImageRecord(id, blob) {
+  if (!blob) return;
+  await writeCocktailImageRecords([{ id, blob, updatedAt: new Date().toISOString() }]);
+}
+
+async function deleteCocktailImageRecords(ids) {
+  const uniqueIds = [...new Set(ids.filter(Boolean))];
+  if (uniqueIds.length) await writeCocktailImageRecords([], uniqueIds);
+}
+
+async function hydrateCocktailImageUrls() {
+  state.cocktailImageUrls.forEach((url) => URL.revokeObjectURL(url));
+  state.cocktailImageUrls.clear();
+  const imageIds = new Set([
+    ...state.cocktail.materials.map((material) => material.imageId),
+    ...state.cocktail.recipes.map((recipe) => recipe.imageId),
+  ].filter(Boolean));
+  if (!imageIds.size) return;
+  const records = await getCocktailImageRecords();
+  records.forEach((record) => {
+    if (imageIds.has(record.id) && record.blob) state.cocktailImageUrls.set(record.id, URL.createObjectURL(record.blob));
+  });
+}
+
+async function saveCocktailImageSnapshot(backupId) {
+  const imageIds = new Set([
+    ...state.cocktail.materials.map((material) => material.imageId),
+    ...state.cocktail.recipes.map((recipe) => recipe.imageId),
+  ].filter(Boolean));
+  const records = await getCocktailImageRecords();
+  const recordById = new Map(records.map((record) => [record.id, record]));
+  const snapshotPrefix = `${cocktailImageBackupPrefix}${backupId}:`;
+  const oldSnapshotIds = records.filter((record) => record.id.startsWith(snapshotPrefix)).map((record) => record.id);
+  const snapshots = [...imageIds]
+    .map((id) => recordById.get(id))
+    .filter((record) => record?.blob)
+    .map((record) => ({ id: `${snapshotPrefix}${record.id}`, blob: record.blob, updatedAt: record.updatedAt }));
+  await writeCocktailImageRecords(snapshots, oldSnapshotIds);
+}
+
+async function deleteCocktailImageSnapshot(backupId) {
+  if (!backupId) return;
+  const prefix = `${cocktailImageBackupPrefix}${backupId}:`;
+  const records = await getCocktailImageRecords();
+  await deleteCocktailImageRecords(records.filter((record) => record.id.startsWith(prefix)).map((record) => record.id));
+}
+
+async function restoreCocktailImageSnapshot(cocktail, backupId) {
+  if (!backupId) return;
+  const prefix = `${cocktailImageBackupPrefix}${backupId}:`;
+  const records = await getCocktailImageRecords();
+  const recordById = new Map(records.map((record) => [record.id, record]));
+  const activeIds = records.filter((record) => !record.id.startsWith(cocktailImageBackupPrefix)).map((record) => record.id);
+  const imageIds = new Set([
+    ...cocktail.materials.map((material) => material.imageId),
+    ...cocktail.recipes.map((recipe) => recipe.imageId),
+  ].filter(Boolean));
+  const restored = [...imageIds]
+    .map((id) => recordById.get(`${prefix}${id}`))
+    .filter((record) => record?.blob)
+    .map((record) => ({ id: record.id.slice(prefix.length), blob: record.blob, updatedAt: record.updatedAt }));
+  await writeCocktailImageRecords(restored, activeIds);
+}
+
+async function prepareCocktailImport(cocktailPackage) {
+  if (!cocktailPackage || typeof cocktailPackage !== "object" || !Array.isArray(cocktailPackage.materials)) {
+    throw new Error("Invalid cocktail backup");
+  }
+  const includesRecipes = Object.prototype.hasOwnProperty.call(cocktailPackage, "recipes") && Array.isArray(cocktailPackage.recipes);
+  const includesRecommendationPlaylists = Object.prototype.hasOwnProperty.call(cocktailPackage, "recommendationPlaylists")
+    && Array.isArray(cocktailPackage.recommendationPlaylists);
+  const sourcePackage = {
+    ...cocktailPackage,
+    recipes: includesRecipes ? cocktailPackage.recipes : state.cocktail.recipes,
+    recommendationPlaylists: includesRecommendationPlaylists
+      ? cocktailPackage.recommendationPlaylists
+      : state.cocktail.recommendationPlaylists,
+  };
+  const cocktail = normalizeCocktail(sourcePackage);
+  const imageMap = new Map();
+  (Array.isArray(cocktailPackage.images) ? cocktailPackage.images : []).forEach((image) => {
+    if (typeof image?.id !== "string" || typeof image.dataUrl !== "string") return;
+    if (!image.dataUrl.startsWith("data:image/")) return;
+    imageMap.set(image.id, image.dataUrl);
+  });
+  const blobs = [];
+  cocktail.materials = cocktail.materials.map((material) => {
+    if (!material.imageId) return material;
+    const dataUrl = imageMap.get(material.imageId);
+    if (!dataUrl) return { ...material, imageId: null };
+    const blob = dataUrlToBlob(dataUrl);
+    blobs.push({ id: material.imageId, blob, updatedAt: new Date().toISOString() });
+    return material;
+  });
+  cocktail.recipes = cocktail.recipes.map((recipe) => {
+    if (!includesRecipes) return recipe;
+    if (!recipe.imageId) return recipe;
+    const dataUrl = imageMap.get(recipe.imageId);
+    if (!dataUrl) return { ...recipe, imageId: null };
+    blobs.push({ id: recipe.imageId, blob: dataUrlToBlob(dataUrl), updatedAt: new Date().toISOString() });
+    return recipe;
+  });
+  if (!includesRecipes) {
+    const currentRecipeImageIds = new Set(state.cocktail.recipes.map((recipe) => recipe.imageId).filter(Boolean));
+    for (const id of currentRecipeImageIds) {
+      if (blobs.some((record) => record.id === id)) continue;
+      const blob = await getCocktailImageBlob(id);
+      if (blob) blobs.push({ id, blob, updatedAt: new Date().toISOString() });
+    }
+  }
+  return { cocktail, blobs };
+}
+
+async function storeImportedCocktailImages(prepared) {
+  const records = await getCocktailImageRecords();
+  const activeIds = records.filter((record) => !record.id.startsWith(cocktailImageBackupPrefix)).map((record) => record.id);
+  await writeCocktailImageRecords(prepared.blobs, activeIds);
+}
+
+async function createCocktailBackupPackage() {
+  const imageIds = [...new Set([
+    ...state.cocktail.materials.map((material) => material.imageId),
+    ...state.cocktail.recipes.map((recipe) => recipe.imageId),
+  ].filter(Boolean))];
+  const images = [];
+  for (const id of imageIds) {
+    const blob = await getCocktailImageBlob(id);
+    if (!blob) throw new Error("Cocktail image is unavailable");
+    images.push({ id, dataUrl: await cocktailBlobToDataUrl(blob) });
+  }
+  return { ...state.cocktail, images };
+}
+
+function cocktailBlobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error || new Error("Image encoding failed"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function dataUrlToBlob(dataUrl) {
+  const match = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i.exec(dataUrl);
+  if (!match) throw new Error("Invalid image data");
+  const binary = atob(match[2].replace(/\s/g, ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: match[1] });
 }
 
 function readFirstLocalStorageValue(keys) {
@@ -8743,12 +11180,12 @@ function normalizeShoppingProducts(products, categoryIds, subcategoryIds, tertia
 function normalizeShoppingRecords(records, now) {
   if (!Array.isArray(records)) return [];
   return records
-    .filter((record) => record?.id && isISODate(record.date) && record.platform)
+    .filter((record) => record?.id && record.platform && (!record.date || isISODate(record.date)))
     .map((record) => {
       const totalPrice = normalizeMoneyInput(record.totalPrice);
       return {
         id: String(record.id),
-        date: record.date,
+        date: isISODate(record.date) ? record.date : "",
         name: typeof record.name === "string" ? record.name : "",
         platform: String(record.platform),
         totalPrice,
@@ -9170,7 +11607,7 @@ function seedTasks() {
 
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js?v=73").catch(() => {});
+    navigator.serviceWorker.register("./sw.js?v=93").catch(() => {});
   }
 }
 

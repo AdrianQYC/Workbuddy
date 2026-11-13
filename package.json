@@ -1,0 +1,56 @@
+{
+  "name": "workbuddy-desktop",
+  "version": "89.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Workbuddy local-first Windows desktop app",
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "desktop:dev": "electron .",
+    "desktop:pack": "electron-builder --win --dir",
+    "desktop:build": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "com.workbuddy.desktop",
+    "productName": "Workbuddy",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "app.js",
+      "desktop/**/*",
+      "english-wordbanks.js",
+      "icon-192.png",
+      "icon-512.png",
+      "icon.svg",
+      "index.html",
+      "manifest.webmanifest",
+      "styles.css",
+      "sw.js"
+    ],
+    "extraResources": [
+      {
+        "from": "Workbuddy.ico",
+        "to": "Workbuddy.ico"
+      }
+    ],
+    "win": {
+      "icon": "Workbuddy.ico",
+      "target": ["nsis"],
+      "artifactName": "Workbuddy-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "include": "desktop/installer.nsh",
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": false,
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

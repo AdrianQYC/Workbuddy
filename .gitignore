@@ -1,2 +1,6 @@
 .workbuddy-service.pid
 .workbuddy-service.log
+node_modules/
+.pnpm-store/
+.build-tmp*/
+release/

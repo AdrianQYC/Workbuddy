@@ -11,13 +11,14 @@
 
 ## 当前项目形态
 
-Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，也不依赖 Node/Vite 构建流程。
+Workbuddy 的业务界面是本地优先的静态网页，没有后端数据库。Windows 桌面版使用 Electron 提供原生窗口和托盘；桌面主进程托管本机静态 HTTP 服务，网页业务代码保持独立。
 
 主要文件：
 
 - `index.html`：页面固定骨架、模块入口、基础表单容器、模板。
 - `app.js`：主要交互逻辑、数据读写、渲染函数、导入导出。
 - `styles.css`：全局样式、模块样式、移动端适配。
+- 桌面宽屏布局由窗口高度约束，左侧模块导航和数据备份区保持固定，右侧内容区独立滚动；窄屏保留自然页面滚动。
 - `english-wordbanks.js`：每日英语词库数据。
 - `manifest.webmanifest`：Chrome 桌面应用/PWA 配置。
 - `sw.js`：离线缓存和桌面版缓存策略。
@@ -26,6 +27,10 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - `启动Workbuddy.cmd`：可见窗口版启动入口，桌面 `Workbuddy` 快捷方式通过 `cmd.exe /c` 调用它。
 - `后台启动Workbuddy.vbs`：备用后台启动入口，当前桌面快捷方式不再使用它。
 - `关闭Workbuddy服务.cmd`：手动关闭服务入口，作为服务残留时的兜底工具。
+- `desktop/main.cjs`：Electron 主进程，管理托盘、窗口、本地 HTTP 服务和 Windows 登录项。
+- `desktop/preload.cjs`：向页面暴露有限的设置接口，不开放 Node.js 或文件系统访问。
+- `desktop/installer.nsh`：NSIS 安装宏，将桌面程序按当前用户安装到 `D:\SOFTWARE\Workbuddy`。
+- `package.json`：桌面应用启动、开发和 Windows 安装包构建配置。
 
 ## 数据边界
 
@@ -39,13 +44,16 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - `workbuddy.english.v1`：每日英语学习进度、备注、复习次数、词组。
 - `workbuddy.knowledge.v1`：知识文库分类、文档、回收站。
 - `workbuddy.shopping.v1`：商品比价分类、商品单位、购买记录和包装规格。
+- `workbuddy.cocktail.v1`：调酒笔记的二级标签、材料和配方。
 - `workbuddy.import-backup.v1`：导入备份前的本机恢复点。
+
+调酒笔记材料和配方图片以 Blob 保存在当前浏览器数据空间的 IndexedDB（数据库 `workbuddy-cocktail-images`），对应记录只保存图片 ID。导出 JSON 时会把图片转为 Base64 一并打包；导入时写回 IndexedDB，因此跨电脑迁移仍只需导入一个 JSON 文件。删除材料会同步解除配方材料的跳转关系并保留名称及分类快照；删除二级标签只会把材料转入未分类，不删除材料或图片。
 
 注意：Chrome 会按访问地址隔离数据。以下地址不是同一份数据：
 
 - `http://localhost:5173`
 - `http://127.0.0.1:5173`
-- `file:///D:/Codex_projects/misc/Workbuddy/index.html`
+- `file:///<Workbuddy 项目目录>/index.html`
 - `https://adrianqyc.github.io/Workbuddy/`
 
 后续应固定推荐 `http://localhost:5173/index.html`。
@@ -58,6 +66,7 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - `english`：每日英语
 - `knowledge`：知识文库
 - `shopping`：商品比价
+- `cocktail`：调酒笔记，包含推荐、配方、吧台三个页面；“新建配方”是从配方页进入的独立编辑页。
 
 新增模块时应遵循：
 
@@ -66,7 +75,23 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - 为模块建立独立的视图状态，例如 `xxxView`。
 - 在 `renderModules()`、模块按钮、模块内部 segments、`currentViewTitle()`、`currentViewMeta()` 中接入。
 - 全局备份导出/导入/恢复要同步接入，但旧备份缺少新模块数据时不能清空当前新模块数据。
+- 调酒笔记使用独立的 `workbuddy.cocktail.v1` 数据键，并纳入 JSON 导入、导出和导入前恢复；旧备份没有 `cocktail` 字段时应保留当前调酒笔记数据，旧版 `cocktail` 没有 `recipes` 或 `recommendationPlaylists` 字段时分别保留当前配方或推荐酒单。
 - 手动排序优先接入通用 `setupSortableElement()`，用 `☰` 拖动按钮或明确的标签拖动区触发，不要再新增上下箭头式排序逻辑。
+
+### 调酒笔记：吧台材料与配方
+
+- 一级分类固定为基础烈酒、利口酒、酸性成分、甜味成分、调和液体、调味剂、果蔬装饰、其它；各一级分类可拥有自己的二级标签。
+- 每个材料只属于一个一级分类，并且只能属于该一级分类下的一个二级标签，或留在固定“未分类”中。未分类不可改名或删除；删除二级标签时，材料转入未分类。
+- 二级标签可以新增；每个标签上的“⋯”管理按钮负责重命名或删除。材料卡片内提供编辑和删除按钮；新建材料时默认未分类，编辑时可改一级分类和二级标签。
+- 材料记录包括中文名称（必填）、英文名称（选填）、一级分类、可选二级标签、介绍和可选图片。卡片和详情页都可进入编辑；修改一级分类或二级标签后，材料按新分类归位。缺少图片时统一显示白底“空”占位图。
+- 吧台和配方页共享一级分类与二级标签，各自提供“全部”；配方分类从配方材料当前所属分类推导。同一配方在多个材料分类中出现时，“全部”仍只显示一张配方卡片。
+- 配方记录包括中文标题（必填）、英文标题（选填）、简介、图片、材料、制作方法和备注。新建/编辑时至少需要一项材料；每个材料行只要求从下拉联想中选择吧台已有材料，度数和用量默认为 0。选中材料后输入框替换为材料标签；保存名称联想结果时记录材料 ID 和名称/分类快照。点击仍存在的材料可打开吧台详情；材料删除后配方记录保留为不可点击的文字。
+- 材料单位可选 `mL`、`g`、`个`、`片`、`滴`、`勺`；度数默认为 0%，用量默认为 0。最终酒精度按所有 `mL` 行的用量加权计算，其它单位不参与；其它单位填入非零度数时在编辑页提示。
+- 搜索需点击搜索按钮或按 Enter 后执行。吧台搜索中英文名称和介绍；配方搜索中英文标题、简介、材料名称和备注、制作方法及配方备注。
+- 图片压缩后存入 IndexedDB；JSON 备份把材料与配方图片以 Base64 一并导出，导入时恢复图片和关联。IndexedDB 与 localStorage 一样按浏览器数据空间隔离，不能仅靠复制源码目录迁移。
+- 当前 v93 已实现吧台材料、分类标签管理、材料搜索，以及配方列表、详情、编辑/新建、材料联想关联、酒精度计算和配方搜索；新建/编辑表单直接处理提交，避免浏览器默认跳页。
+- 推荐页数据存放在 `workbuddy.cocktail.v1` 的 `recommendationPlaylists` 中。每条酒单含唯一 ID、一级分类 ID、名称、配方 ID 列表和首页展示标记；酒单只保存配方关联，不复制配方。时令首页按当前节气和酒单名称匹配，风味/场景按首页展示标记显示（未设置时取该类第一条）。删除酒单或从酒单移除配方只改推荐关联，不删除配方；删除配方时归一化数据会清除无效的酒单配方 ID。添加配方时仅可从已有配方多选，同一酒单内不重复。
+- 推荐页视图状态包括首页、一级分类酒单列表、完整酒单和只读配方详情；推荐详情返回原酒单。配方图片继续使用配方记录已有的图片 ID，不在推荐数据中复制图片。JSON 导出会随调酒数据包含推荐酒单；导入旧版调酒备份未带 `recommendationPlaylists` 时保留当前推荐酒单。
 
 ## 渲染入口
 
@@ -74,18 +99,22 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 
 当前主要流程：
 
-- `renderModules()`：控制每日计划、每日英语、知识文库哪个模块显示。
+- `renderModules()`：控制每日计划、每日英语、知识文库、商品比价、调酒笔记哪个模块显示。
 - `renderSegments()`：每日计划内部栏目状态。
 - `renderEnglishSegments()`：每日英语内部栏目状态。
 - `renderKnowledgeSegments()`：知识文库内部栏目状态。
+- `renderCocktailModule()`：调酒笔记内部页面和独立新建配方页面状态。
 - `renderStats()`：每日计划和每日英语统计。
 - `renderList()`：根据当前模块分发到对应渲染函数。
+- `init()` 绑定事件后立即同步执行首次 `render()`；桌面设置读取和调酒图片 IndexedDB 加载在后台完成，不能阻断每日计划等模块的首屏显示。
+- `init()` 绑定事件后立即同步执行首次 `render()`；桌面设置读取和调酒图片 IndexedDB 加载在后台完成，不能阻断每日计划等模块的首屏显示。
 
 `renderList()` 中的模块分流不要互相穿透：
 
 - `state.module === "english"` 时调用 `renderEnglishShell()`。
 - `state.module === "knowledge"` 时调用 `renderKnowledgeShell()`。
 - `state.module === "shopping"` 时调用 `renderShoppingShell()`。
+- `state.module === "cocktail"` 时调用 `renderCocktailModule()`。
 - 其它情况才走每日计划任务列表。
 
 ## 模态框
@@ -248,7 +277,7 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - 使用独立数据键 `workbuddy.shopping.v1`，不要混入任务、英语或知识文库数据。
 - 购物数据只来自用户手动填写，不接入购物平台账号，不做自动抓取。
 - 分类是三级结构：一级分类保存在 `categories`，二级分类保存在 `subcategories`，三级分类保存在 `tertiaryCategories`；商品通过 `categoryId`、可空的 `subcategoryId` 和可空的 `tertiaryCategoryId` 归类。
-- 商品层级保存商品单位 `unit`；购买记录保存日期、本次名称、平台、总价、购买包装数、包装规格、购买链接和本次备注，其中价格、购买包装数和包装字段允许为空。
+- 商品层级保存商品单位 `unit`；购买记录保存日期、本次名称、平台、总价、购买包装数、包装规格、购买链接和本次备注，其中日期、价格、购买包装数和包装字段允许为空。
 - 新购买记录的 `packaging` 统一保存 `packageUnit`（外包装单位）、`innerQuantity` 与 `innerQuantityUnit`（包装内数量）、`contentAmount` 与 `contentUnit`（包装内含量）。不再保存或显示旧版 `quantity`、`pricingMode`、`mode`、`amount`、`count` 等字段。
 - 填写包装内数量时，包装内含量表示每个内装单位的含量；包装内数量为空时，包装内含量表示整包总含量；两者都为空时，只能计算包装单价。包装单位、包装内数量单位和含量单位彼此独立。
 - 记录可产生包装单价和内容单价；商品单位匹配包装单位或内容单位时，商品卡片使用匹配的价格。g/kg、ml/L 只做同维度全局换算，其他单位只做精确匹配。
@@ -256,10 +285,11 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 - 购买记录的 `purchaseLink` 保存用户手动填写的购买链接；记录列表和编辑表单都提供复制按钮。
 - 旧购物数据里的 `standardCode` 和商品 `note` 在规范化时忽略，不再显示或写回；购买记录的 `note` 继续保留。
 - 购买记录平台使用固定下拉选项：淘宝、京东、拼多多、抖音、盒马、阿里巴巴。
-- 购买记录新增和修改使用商品卡片内的行内表单；新增时表单位于记录列表顶部，修改时当前记录行切换为编辑态，不使用浏览器原生连续 `prompt()`。
+- 商品列表可在分类视图和平台视图间切换；平台视图从购买记录动态统计平台，每个商品按平台去重显示，展开后只显示所选平台的购买记录和该平台最低单价。没有购买记录的商品单独归入“未记录平台”；该视图状态只保存在内存中，不改变购物数据结构。
+- 购买记录新增和修改使用商品卡片内的行内表单；日期允许留空，缺失时记录列表只显示名称和平台；新增时表单位于记录列表顶部，修改时当前记录行切换为编辑态，不使用浏览器原生连续 `prompt()`。
 - 单价不单独保存，渲染时根据包装单位、包装内数量和包装内含量临时计算；总价、购买包装数或必要的包装数据为空，或数量不大于 0 时，不计算对应单价并显示为空。
 - 总价默认单位为元；商品单位和包装规格中的单位是自由文本，只有 g/kg、ml/L 等可识别同维度单位自动换算。
-- 分类区采用左侧目录式布局，一级、二级和三级分类分区显示；三级分类仅在选中具体二级分类后显示；商品搜索和排序属于右侧商品列表工具栏。
+- 分类区采用左侧目录式布局，一级、二级和三级分类分区显示；三级分类仅在选中具体二级分类后显示；分类/平台切换也位于左侧导航，商品搜索和排序属于右侧商品列表工具栏。平台筛选与搜索条件组合，“当前视图”导出遵循当前平台筛选。
 - 商品比价导出使用前端生成 `.xlsx`，导出范围支持全部、当前视图和自定义一级/二级/三级分类；工作簿包含购买记录明细、商品汇总和导出说明。
 - `.xlsx` 由 `createXlsxBlob()` 生成，复用项目内无压缩 ZIP 生成器，不依赖外部库。
 - 商品支持手动拖动排序；一级、二级和三级分类标签也支持拖动排序，二级分类只在所属一级分类内排序，三级分类只在所属二级分类内排序。
@@ -287,6 +317,23 @@ Workbuddy 是一个本地优先的静态网页应用，没有后端数据库，�
 
 ## 本地启动逻辑
 
+### Windows 桌面版
+
+- 浏览器代码版和 Electron 开发版共用项目里的页面与业务源码，不是两条独立开发线。日常修改直接改 Workbuddy 源码；Electron 主进程和桌面接口为同一套页面补充窗口、托盘、开机自启动等能力。浏览器环境没有 Electron 接口时，桌面专属功能会隐藏或不可用。
+- `desktop/main.cjs` 在 Electron 主进程中监听 `127.0.0.1:5173`，只提供应用静态资源；页面继续通过固定的 `http://localhost:5173` 加载。
+- 主进程同时拥有窗口、托盘和 HTTP 服务；托盘菜单“退出 Workbuddy”会退出主进程并关闭服务，不会留下独立 PowerShell 服务进程。
+- 窗口关闭策略由本机设置控制；托盘单击/双击打开窗口，右键菜单可打开窗口、进入设置或退出。
+- `workbuddy-desktop-settings.json` 保存在 Electron 的用户配置目录，只存桌面开关，不保存在仓库，不包含 Workbuddy 业务数据。
+- 开机自启动通过 Electron Windows 登录项接口配置；只有安装版中用户开启设置后才写入，启动参数 `--hidden` 使其登录后直接进入托盘。
+- `pnpm desktop:dev` 和桌面 `Workbuddy开发模式.lnk` 用于 Electron 开发预览，直接读取当前源码；开发模式禁用开机自启动设置。开发模式与安装版共用 Electron 用户资料 `%APPDATA%\Workbuddy`，其中包含业务 localStorage 和桌面设置。`pnpm desktop:build` 生成 Windows 安装包到 `release/`，安装时目标目录固定为 `D:\SOFTWARE\Workbuddy`，只安装给当前用户。卸载默认保留数据。渲染进程关闭 Node 集成并启用 context isolation 与 sandbox。
+- Git 跟踪 Electron 源码、构建配置与锁文件；`node_modules/`、`.pnpm-store/`、`.build-tmp*/` 和 `release/` 忽略。安装包作为 GitHub Release 附件单独发布；用户资料和 JSON 备份不上传。
+- Electron 有独立于 Chrome 的浏览器数据目录。即使二者都用 `localhost:5173`，`localStorage` 也不共享；从 Chrome 迁移时需要手动导出 JSON，再在桌面版导入。导出的源 JSON 不会被改写。
+- 桌面 `Workbuddy.lnk` 保留为浏览器版入口，继续调用项目 `.cmd`/PowerShell 启动方式；`Workbuddy开发模式.lnk` 直接调用本机 Electron 运行文件并传入当前项目目录。两个快捷方式和 Electron 缓存都是本机文件，不随 GitHub 仓库同步。
+- 浏览器版、Electron 开发模式和 Electron 安装版的功能测试范围记录在 `开发与测试说明.md`：业务界面优先用浏览器版；托盘、窗口和本地服务生命周期用 Electron 开发模式；开机自启动和安装行为只能用安装版验证。两个 Electron 入口共用 `%APPDATA%\Workbuddy`，浏览器版使用独立的 Chrome 数据空间。
+- 日常源码迭代不自动构建安装包；只有用户明确要求更新桌面版时才运行 `pnpm desktop:build`。构建安装包不会自动安装、启动、提交 Git 或上传 GitHub。
+
+### 旧版 Chrome/PWA 回退方式
+
 桌面 `Workbuddy` 快捷方式目标是：
 
 ```text
@@ -296,13 +343,13 @@ C:\Windows\System32\cmd.exe
 快捷方式参数是：
 
 ```text
-/c ""D:\Codex_projects\misc\Workbuddy\启动Workbuddy.cmd""
+/c ""<Workbuddy 项目目录>\启动Workbuddy.cmd""
 ```
 
 这个 cmd 会运行：
 
 ```text
-D:\Codex_projects\misc\Workbuddy\start-workbuddy.ps1
+<Workbuddy 项目目录>\start-workbuddy.ps1
 ```
 
 启动脚本做的事：
@@ -320,7 +367,7 @@ D:\Codex_projects\misc\Workbuddy\start-workbuddy.ps1
 手动关闭服务使用：
 
 ```text
-D:\Codex_projects\misc\Workbuddy\关闭Workbuddy服务.cmd
+<Workbuddy 项目目录>\关闭Workbuddy服务.cmd
 ```
 
 ## 缓存和版本号
@@ -339,6 +386,8 @@ const cacheName = "workbuddy-v81";
 ```
 
 每次修改前端文件后，通常需要同步提升版本号，避免 Chrome 桌面版混用旧缓存。
+
+例外：调酒笔记首轮功能统一归入 `v93`。首轮开发中的所有调酒功能继续累计在 v93；推荐内容和调酒笔记首轮功能初步完成后才开始 v94。期间不因每次迭代重复提升缓存版本。
 
 `start-workbuddy.ps1` 还会在启动地址后自动添加 `?wb=文件修改时间戳`。这个参数只用于让 Chrome 重新请求最新文件，不改变 `localhost:5173` 的浏览器数据空间。
 
