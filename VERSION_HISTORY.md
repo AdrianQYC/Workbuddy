@@ -6,7 +6,7 @@
 
 - 本地缓存版本：`index.html`、`app.js`、`styles.css`、`sw.js` 里使用的 `vXX`，主要用于让浏览器加载新文件，当前是 `v93`。
 - Git 版本：每次 `git commit` 生成的代码快照，用提交哈希识别，例如 `209d40a`。
-- GitHub 版本：已经推送到 GitHub `main` 分支上的 Git 提交。当前共有 11 个代码快照标签；此前已发布 10 个 GitHub Release，v93 标签已推送，Release 页面待登录后发布。
+- GitHub 版本：已经推送到 GitHub `main` 分支上的 Git 提交。当前共有 11 个带标签并已发布的 GitHub Release，包括 7 个正式版本和 4 个早期功能里程碑。
 
 ## 本地缓存版本
 
@@ -154,7 +154,7 @@
 
 ## Git / GitHub 提交记录
 
-当前仓库已为以下 11 个代码快照建立 Git tag；列表中的 v93 Release 页面待登录后发布，其余 10 个 Release 已发布。`bebc8b2` 仅更新缓存，`e3f468b` 仅更新文档，因此不单独建立 Release。
+当前仓库已为以下 11 个代码快照建立 Git tag 和 GitHub Release。`bebc8b2` 仅更新缓存，`e3f468b` 仅更新文档，因此不单独建立 Release。
 
 - `early-initial` -> `acf1e32` - Initial Workbuddy app：建立 Workbuddy 初始版本，包含每日计划的基础任务管理。
 - `early-canceled-task` -> `c4ced0e` - Add canceled task records：新增任务取消记录，保留取消原因和原日期。
